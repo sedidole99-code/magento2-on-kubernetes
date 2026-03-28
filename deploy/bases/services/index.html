@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m2kube — Dev Services</title>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --green: #4ade80; --yellow: #fbbf24; --red: #f87171; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: var(--bg); color: var(--text); padding: 2rem; line-height: 1.6; }
+
+  header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; }
+  .controls { display: flex; align-items: center; gap: 1rem; }
+  .btn { background: var(--card); border: 1px solid var(--border); color: var(--accent); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: border-color 0.2s; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .indicator { font-size: 0.75rem; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 1.5rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .card h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 0.3rem 0; font-size: 0.85rem; vertical-align: top; text-align: left; }
+  td:first-child, th:first-child { color: var(--muted); white-space: nowrap; padding-right: 1rem; width: 40%; }
+  td:last-child { word-break: break-all; }
+  .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; }
+
+  .cmd { background: #0f172a; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.75rem; font-size: 0.8rem; font-family: monospace; color: var(--green); margin-top: 0.5rem; display: block; cursor: pointer; position: relative; }
+  .cmd:hover { border-color: var(--accent); }
+  .cmd::after { content: 'click to copy'; position: absolute; right: 0.5rem; top: 0.5rem; font-size: 0.65rem; color: var(--muted); }
+  .cmd.copied::after { content: 'copied!'; color: var(--green); }
+
+  .copyable { cursor: pointer; border-bottom: 1px dashed var(--border); }
+  .copyable:hover { color: var(--accent); }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .badge-green { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
+  .badge-red { background: rgba(248,113,113,0.15); color: var(--red); }
+
+  .pods-section { margin-top: 2rem; }
+  .pods-section h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1rem; }
+  .pods-table { width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+  .pods-table th { background: var(--bg); padding: 0.6rem 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .pods-table td { padding: 0.5rem 1rem; border-top: 1px solid var(--border); font-size: 0.85rem; }
+  .pods-table td:first-child, .pods-table th:first-child { color: var(--text); width: auto; }
+
+  .loading { color: var(--muted); text-align: center; padding: 3rem; font-size: 1rem; }
+
+  @media (max-width: 500px) { .grid { grid-template-columns: 1fr; } body { padding: 1rem; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>m2kube — Development Services</h1>
+    <p class="subtitle" id="subtitle">Loading cluster data...</p>
+  </div>
+  <div class="controls">
+    <span class="indicator" id="indicator"></span>
+    <button class="btn" id="refresh-btn" onclick="refreshAll()">Refresh Now</button>
+  </div>
+</header>
+
+<div class="grid" id="grid"><div class="loading">Connecting to collector...</div></div>
+<div class="pods-section" id="pods-section"></div>
+
+<script>
+let S = null; // static data (credentials, images, helm)
+let D = null; // dynamic data (pods, services)
+
+const DYNAMIC_INTERVAL = 30000;  // 30s — matches collector's 2min, gives responsive UI
+const STATIC_INTERVAL = 300000;  // 5min — credentials rarely change
+
+// ========================================================================= //
+// Fetch
+// ========================================================================= //
+
+async function fetchStatic() {
+  try {
+    const r = await fetch('/data/static.json?t=' + Date.now());
+    if (r.ok) S = await r.json();
+  } catch(e) { /* collector may not have written yet */ }
+}
+
+async function fetchDynamic() {
+  try {
+    const r = await fetch('/data/dynamic.json?t=' + Date.now());
+    if (r.ok) D = await r.json();
+  } catch(e) { /* collector may not have written yet */ }
+}
+
+async function refreshAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true; btn.textContent = 'Refreshing...';
+  await Promise.all([fetchStatic(), fetchDynamic()]);
+  render();
+  btn.disabled = false; btn.textContent = 'Refresh Now';
+}
+
+// ========================================================================= //
+// Helpers
+// ========================================================================= //
+
+function esc(s) {
+  if (!s) return 'n/a';
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+function timeAgo(iso) {
+  if (!iso) return 'never';
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 10) return 'just now';
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  return Math.floor(sec / 3600) + 'h ago';
+}
+
+function copyText(text, el) {
+  navigator.clipboard.writeText(text).then(() => {
+    el.classList.add('copied');
+    setTimeout(() => el.classList.remove('copied'), 1500);
+  });
+}
+
+function mono(v) { return '<span class="mono">' + esc(v) + '</span>'; }
+
+function copyable(v) {
+  const escaped = esc(v);
+  return '<span class="mono copyable" onclick="navigator.clipboard.writeText(\'' + escaped.replace(/'/g, "\\'") + '\')" title="Click to copy">' + escaped + '</span>';
+}
+
+function cmd(text) {
+  return '<code class="cmd" onclick="copyText(\'' + text.replace(/'/g, "\\'") + '\', this)">' + esc(text) + '</code>';
+}
+
+function link(url) { return '<a href="' + url + '" target="_blank">' + esc(url) + '</a>'; }
+
+function row(label, value) { return '<tr><td>' + esc(label) + '</td><td>' + value + '</td></tr>'; }
+
+function card(title, rows, footer) {
+  let h = '<div class="card"><h2>' + esc(title) + '</h2><table>';
+  for (const r of rows) h += r;
+  h += '</table>';
+  if (footer) h += footer;
+  h += '</div>';
+  return h;
+}
+
+function badge(text, color) {
+  return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
+}
+
+function statusColor(s) {
+  if (s === 'Running' || s === 'Completed' || s === 'Succeeded') return 'green';
+  if (s === 'Pending' || s === 'ContainerCreating' || s === 'PodInitializing') return 'yellow';
+  return 'red';
+}
+
+// ========================================================================= //
+// Render
+// ========================================================================= //
+
+function render() {
+  const svc = D?.services || {};
+  const ver = S?.versions || {};
+  let html = '';
+
+  // Magento
+  if (S?.magento) {
+    const m = S.magento;
+    html += card('Magento Storefront', [
+      row('Frontend URL', link('https://magento.test/')),
+      row('Admin URL', link('https://magento.test/' + (m.admin_uri || 'admin'))),
+      row('Admin User', copyable(m.admin_user)),
+      row('Admin Password', copyable(m.admin_password)),
+      row('Admin Email', mono(m.admin_email)),
+      row('Image', mono(m.image)),
+      row('Service', mono('magento-web (' + (svc.magento_web || 'n/a') + ')')),
+    ]);
+  }
+
+  // Database
+  if (S?.database) {
+    const d = S.database;
+    html += card('Database (Percona)', [
+      row('Host', mono('db:3306')),
+      row('Service', mono(svc.db || 'n/a')),
+      row('Database', copyable(d.name)),
+      row('User', copyable(d.user)),
+      row('Password', copyable(d.password)),
+      row('Root Password', copyable(d.root_password)),
+      row('Image', mono(d.image)),
+    ], cmd('kubectl port-forward svc/db 3306:3306'));
+  }
+
+  // Elasticsearch (Magento search)
+  html += card('Elasticsearch (Magento Search)', [
+    row('Host', mono('elasticsearch:9200')),
+    row('Service', mono(svc.elasticsearch || 'n/a')),
+    row('Security', badge('disabled', 'yellow')),
+    row('Image', mono(S?.elasticsearch?.image || 'n/a')),
+  ], cmd('kubectl port-forward svc/elasticsearch 9200:9200'));
+
+  // Redis
+  html += card('Redis', [
+    row('Host', mono('redis:6379')),
+    row('Service', mono(svc.redis || 'n/a')),
+    row('DB 0', 'Cache'),
+    row('DB 1', 'Full Page Cache'),
+    row('DB 2', 'Sessions'),
+    row('Image', mono(S?.redis?.image || 'n/a')),
+  ], cmd('kubectl port-forward svc/redis 6379:6379'));
+
+  // Varnish
+  html += card('Varnish', [
+    row('Host', mono('varnish:8080')),
+    row('Service', mono(svc.varnish || 'n/a')),
+    row('Cache Size', '512 MB'),
+    row('Admin Port', mono('6081')),
+    row('Image', mono(S?.varnish?.image || 'n/a')),
+  ]);
+
+  // Grafana
+  html += card('Grafana', [
+    row('URL', link('http://localhost:3000')),
+    row('Service', mono(svc.grafana || 'n/a')),
+    row('Username', copyable('admin')),
+    row('Password', copyable('admin')),
+    row('Chart Version', mono(ver.prometheus || 'n/a')),
+  ], cmd('kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80'));
+
+  // Prometheus
+  html += card('Prometheus', [
+    row('URL', link('http://localhost:9090')),
+    row('Service', mono(svc.prometheus || 'n/a')),
+    row('Chart Version', mono(ver.prometheus || 'n/a')),
+  ], cmd('kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090'));
+
+  // Kibana
+  html += card('Kibana', [
+    row('URL', link('http://localhost:5601')),
+    row('Service', mono(svc.kibana || 'n/a')),
+    row('Username', copyable('elastic')),
+    row('Password', copyable(S?.kibana?.es_password || 'n/a')),
+    row('ES Host', mono('elasticsearch-master:9200')),
+    row('Chart Version', mono(ver.kibana || 'n/a')),
+  ], cmd('kubectl port-forward svc/kibana-kibana 5601:5601'));
+
+  // Helm releases
+  if (S?.helm_releases?.length) {
+    const rows = S.helm_releases.map(r => row(r.name, badge('deployed', 'green')));
+    html += card('Helm Releases', rows);
+  }
+
+  // Cluster
+  html += card('Cluster', [
+    row('Minikube IP', mono(D?.minikube_ip || 'n/a')),
+    row('Pods Running', (D ? D.pods_running + ' / ' + D.pods_total : 'n/a')),
+    row('Ingress Host', mono('magento.test')),
+    row('TLS', 'Self-signed (cert-manager)'),
+  ], cmd('minikube dashboard'));
+
+  document.getElementById('grid').innerHTML = html || '<div class="loading">No data available yet.</div>';
+
+  // Subtitle
+  const staticAge = S ? timeAgo(S.updated) : 'waiting';
+  const dynamicAge = D ? timeAgo(D.updated) : 'waiting';
+  document.getElementById('subtitle').innerHTML =
+    'Pods: ' + (D ? D.pods_running + '/' + D.pods_total : '?/?') + ' running' +
+    ' &middot; Dynamic: ' + dynamicAge +
+    ' &middot; Static: ' + staticAge;
+
+  // Indicator
+  document.getElementById('indicator').textContent =
+    'Auto-refresh: 30s / 5m';
+
+  // Pods table
+  renderPods();
+}
+
+function renderPods() {
+  const el = document.getElementById('pods-section');
+  if (!D?.pods?.length) { el.innerHTML = ''; return; }
+
+  let h = '<h2>Pod Status</h2><table class="pods-table">';
+  h += '<tr><th>Name</th><th>Ready</th><th>Status</th><th>Restarts</th><th>Age</th></tr>';
+  for (const p of D.pods) {
+    h += '<tr>';
+    h += '<td class="mono">' + esc(p.name) + '</td>';
+    h += '<td>' + esc(p.ready) + '</td>';
+    h += '<td>' + badge(p.status, statusColor(p.status)) + '</td>';
+    h += '<td>' + esc(p.restarts) + '</td>';
+    h += '<td>' + esc(p.age) + '</td>';
+    h += '</tr>';
+  }
+  h += '</table>';
+  el.innerHTML = h;
+}
+
+// ========================================================================= //
+// Init
+// ========================================================================= //
+
+refreshAll();
+setInterval(async () => { await fetchDynamic(); render(); }, DYNAMIC_INTERVAL);
+setInterval(async () => { await fetchStatic(); render(); }, STATIC_INTERVAL);
+
+// Update "time ago" display every 10s without re-fetching
+setInterval(() => {
+  if (S || D) {
+    const staticAge = S ? timeAgo(S.updated) : 'waiting';
+    const dynamicAge = D ? timeAgo(D.updated) : 'waiting';
+    document.getElementById('subtitle').innerHTML =
+      'Pods: ' + (D ? D.pods_running + '/' + D.pods_total : '?/?') + ' running' +
+      ' &middot; Dynamic: ' + dynamicAge +
+      ' &middot; Static: ' + staticAge;
+  }
+}, 10000);
+</script>
+</body>
+</html>

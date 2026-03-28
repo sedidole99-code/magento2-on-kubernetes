@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- deployment.yaml
+- service.yaml
+- rbac.yaml
+- credentials.yaml
+
+configMapGenerator:
+- name: services-dashboard-html
+  files:
+  - index.html
+- name: services-dashboard-scripts
+  files:
+  - services.sh
+- name: services-dashboard-nginx
+  files:
+  - nginx.conf

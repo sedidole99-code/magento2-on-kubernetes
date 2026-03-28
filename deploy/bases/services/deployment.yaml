@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: services-dashboard
+  labels:
+    app: services-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: services-dashboard
+  template:
+    metadata:
+      labels:
+        app: services-dashboard
+    spec:
+      serviceAccountName: services-dashboard
+      initContainers:
+      - name: generate-htpasswd
+        image: httpd:alpine
+        command: ["sh", "-c"]
+        args:
+        - |
+          htpasswd -bc /auth/.htpasswd "$DASH_USER" "$DASH_PASS"
+        env:
+        - name: DASH_USER
+          valueFrom:
+            secretKeyRef:
+              name: services-dashboard-credentials
+              key: username
+        - name: DASH_PASS
+          valueFrom:
+            secretKeyRef:
+              name: services-dashboard-credentials
+              key: password
+        volumeMounts:
+        - name: auth
+          mountPath: /auth
+      containers:
+      - name: web
+        image: nginxinc/nginx-unprivileged:alpine
+        ports:
+        - name: http
+          containerPort: 8080
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html/index.html
+          subPath: index.html
+        - name: data
+          mountPath: /usr/share/nginx/html/data
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: nginx.conf
+        - name: auth
+          mountPath: /etc/nginx/auth
+          readOnly: true
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            memory: 32Mi
+      - name: collector
+        image: bitnami/kubectl:latest
+        command: ["bash", "/scripts/services.sh", "serve", "/data"]
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+      volumes:
+      - name: html
+        configMap:
+          name: services-dashboard-html
+      - name: scripts
+        configMap:
+          name: services-dashboard-scripts
+          defaultMode: 0755
+      - name: nginx-conf
+        configMap:
+          name: services-dashboard-nginx
+      - name: auth
+        emptyDir: {}
+      - name: data
+        emptyDir: {}

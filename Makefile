@@ -193,8 +193,31 @@ deploy-only:
 # --------------------------------------------------------------------------- #
 
 services:
-	KUBECTL="$(KUBECTL)" HELM="$(HELM)" MINIKUBE="$(MINIKUBE)" ./deploy/services.sh services.html
-	@xdg-open services.html 2>/dev/null || open services.html 2>/dev/null || echo "Open services.html in your browser"
+	KUBECTL="$(KUBECTL)" HELM="$(HELM)" MINIKUBE="$(MINIKUBE)" ./deploy/bases/services/services.sh html services.html
+	@(xdg-open services.html >/dev/null 2>&1 || open services.html >/dev/null 2>&1 || echo "Open services.html in your browser") &
+
+SERVICES_PERSISTENT ?= false
+
+services-server:
+	$(KUSTOMIZE) build deploy/bases/services | $(KUBECTL) apply -f -
+	@$(KUBECTL) rollout status deployment/services-dashboard --timeout=120s
+	@echo ""
+	@echo "Services dashboard: http://localhost:8080"
+	@printf "  Username: " && $(KUBECTL) get secret services-dashboard-credentials -o jsonpath='{.data.username}' | base64 -d && echo ""
+	@printf "  Password: " && $(KUBECTL) get secret services-dashboard-credentials -o jsonpath='{.data.password}' | base64 -d && echo ""
+	@echo ""
+ifeq ($(SERVICES_PERSISTENT),true)
+	@echo "Dashboard pod will keep running after port-forward stops."
+	@echo "To remove later: kubectl delete -k deploy/bases/services"
+else
+	@echo "Dashboard pod will be removed when port-forward stops."
+endif
+	@echo "Press Ctrl+C to stop"
+	$(KUBECTL) port-forward svc/services-dashboard 8080:8080; \
+	if [ "$(SERVICES_PERSISTENT)" != "true" ]; then \
+		echo "Cleaning up dashboard pod..."; \
+		$(KUBECTL) delete -k deploy/bases/services --ignore-not-found; \
+	fi
 
 # --------------------------------------------------------------------------- #
 # Teardown
@@ -205,4 +228,4 @@ destroy:
 	$(KUBECTL) delete pvc data-db-0
 	$(KUBECTL) delete pvc data-elasticsearch-0
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy services
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy services services-server

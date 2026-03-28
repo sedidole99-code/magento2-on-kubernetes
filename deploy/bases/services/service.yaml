@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: services-dashboard
+spec:
+  selector:
+    app: services-dashboard
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
