@@ -1,3 +1,28 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-docker build --build-arg COMPOSER_AUTH=$COMPOSER_AUTH -f $DOCKERFILE_PATH -t $IMAGE_NAME .
+if [ -z "${IMAGE_NAME:-}" ]; then
+  echo "Error: IMAGE_NAME is not set."
+  echo "Run: make build"
+  exit 1
+fi
+
+if [ -z "${DOCKERFILE_PATH:-}" ]; then
+  echo "Error: DOCKERFILE_PATH is not set."
+  echo "Run: make build"
+  exit 1
+fi
+
+if [ -z "${COMPOSER_AUTH:-}" ]; then
+  echo "Error: COMPOSER_AUTH is not set."
+  echo `Run: export COMPOSER_AUTH='{"http-basic":{"repo.magento.com":{"username":"...","password":"..."}}}'`
+  exit 1
+fi
+
+echo "Image name: ${IMAGE_NAME}"
+echo "Dockerfile path: ${DOCKERFILE_PATH}"
+
+docker build \
+  --build-arg COMPOSER_AUTH="${COMPOSER_AUTH}" \
+  -f "${DOCKERFILE_PATH}" \
+  -t "${IMAGE_NAME}" \
+  .

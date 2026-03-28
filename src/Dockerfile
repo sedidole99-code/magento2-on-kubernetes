@@ -3,6 +3,7 @@ FROM php:8.2.29-fpm@sha256:51f07dca382e17bba500c7c029c0fb867e18bcb6cad991fddb021
 ENV COMPOSER_HOME=/tmp/composer
 
 RUN apt-get update && apt-get install -y --no-install-recommends gnupg \
+    nano \
     nginx \
     netcat-openbsd \
     libicu-dev \
