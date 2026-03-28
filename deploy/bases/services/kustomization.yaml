@@ -6,11 +6,13 @@ resources:
 - service.yaml
 - rbac.yaml
 - credentials.yaml
+- backup-pvc.yaml
 
 configMapGenerator:
 - name: services-dashboard-html
   files:
   - index.html
+  - backups.html
 - name: services-dashboard-scripts
   files:
   - services.sh

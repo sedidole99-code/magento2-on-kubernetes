@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+spec:
+  schedule: '0 2 * * *'
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: backup
+            component: db
+        spec:
+          initContainers:
+          - name: wait-for-db
+            image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+            command: ["/bin/sh"]
+            args:
+            - -c
+            - |
+              echo "Waiting for database..."
+              while ! nc -z db 3306; do sleep 2; done
+              echo "Database is ready"
+          containers:
+          - name: db-backup
+            image: percona:8.0@sha256:5a09f82af8005b1df25cffa7a24472b2eaa57c4dbb355c050e24b2dd062e1005
+            command: ["/bin/bash"]
+            args:
+            - -c
+            - |
+              set -e
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              BACKUP_DIR=/backup/db
+              mkdir -p "$BACKUP_DIR"
+              echo "Starting database backup: db-${TIMESTAMP}.sql.gz"
+              mysqldump -h db -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" \
+                --single-transaction --quick --lock-tables=false --no-tablespaces \
+                2>/dev/null \
+                | gzip > "$BACKUP_DIR/db-${TIMESTAMP}.sql.gz"
+              echo "Backup complete: db-${TIMESTAMP}.sql.gz ($(du -h "$BACKUP_DIR/db-${TIMESTAMP}.sql.gz" | cut -f1))"
+              cd "$BACKUP_DIR"
+              ls -1t db-*.sql.gz | tail -n +$((BACKUP_RETENTION + 1)) | xargs -r rm -f
+              echo "Backups after rotation:"
+              ls -lht db-*.sql.gz
+            env:
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: database-credentials
+                  key: MYSQL_DATABASE
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-credentials
+                  key: MYSQL_USER
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: database-credentials
+                  key: MYSQL_PASSWORD
+            - name: BACKUP_RETENTION
+              value: "7"
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+          restartPolicy: Never
+          volumes:
+          - name: backup
+            persistentVolumeClaim:
+              claimName: backup
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  failedJobsHistoryLimit: 5
+  successfulJobsHistoryLimit: 3

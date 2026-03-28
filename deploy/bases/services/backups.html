@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m2kube — Backups</title>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --green: #4ade80; --yellow: #fbbf24; --red: #f87171; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: var(--bg); color: var(--text); padding: 2rem; line-height: 1.6; }
+
+  header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; }
+  .controls { display: flex; align-items: center; gap: 1rem; }
+  .btn { background: var(--card); border: 1px solid var(--border); color: var(--accent); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: border-color 0.2s; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .section { margin-bottom: 2rem; }
+  .section h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1rem; }
+
+  .backup-table { width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+  .backup-table th { background: var(--bg); padding: 0.6rem 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); text-align: left; }
+  .backup-table td { padding: 0.5rem 1rem; border-top: 1px solid var(--border); font-size: 0.85rem; }
+  .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .badge-green { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
+
+  .empty { color: var(--muted); padding: 1.5rem; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+  .btn-delete { background: transparent; border: 1px solid var(--red); color: var(--red); padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-family: inherit; }
+  .btn-delete:hover { background: rgba(248,113,113,0.15); }
+
+  .cmd { background: #0f172a; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.75rem; font-size: 0.8rem; font-family: monospace; color: var(--green); margin-top: 0.75rem; display: block; cursor: pointer; position: relative; }
+  .cmd:hover { border-color: var(--accent); }
+  .cmd::after { content: 'click to copy'; position: absolute; right: 0.5rem; top: 0.5rem; font-size: 0.65rem; color: var(--muted); }
+  .cmd.copied::after { content: 'copied!'; color: var(--green); }
+
+  .copyable { cursor: pointer; border-bottom: 1px dashed var(--border); }
+  .copyable:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>m2kube — Backups</h1>
+    <p class="subtitle" id="subtitle">Loading...</p>
+  </div>
+  <div class="controls">
+    <a href="/" class="btn" style="text-decoration:none">Dashboard</a>
+    <button class="btn" id="refresh-btn" onclick="refresh()">Refresh Now</button>
+  </div>
+</header>
+
+<div class="section" id="db-section"></div>
+<div class="section" id="media-section"></div>
+
+<div class="section">
+  <h2>Manual Backup Commands</h2>
+  <code class="cmd" onclick="copyCmd(this)">make backup-db</code>
+  <code class="cmd" onclick="copyCmd(this)">make backup-media</code>
+  <code class="cmd" onclick="copyCmd(this)">make backup</code>
+</div>
+
+<div class="section">
+  <h2>Restore Commands</h2>
+  <code class="cmd" onclick="copyCmd(this)">make restore-db</code>
+  <code class="cmd" onclick="copyCmd(this)">make restore-media</code>
+  <code class="cmd" id="restore-specific" onclick="copyCmd(this)">make restore-db BACKUP_NAME=&lt;filename&gt;</code>
+</div>
+
+<script>
+let D = null;
+
+function esc(s) {
+  if (!s) return 'n/a';
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+function timeAgo(iso) {
+  if (!iso) return 'never';
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 10) return 'just now';
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  return Math.floor(sec / 3600) + 'h ago';
+}
+
+function copyCmd(el) {
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    el.classList.add('copied');
+    setTimeout(() => el.classList.remove('copied'), 1500);
+  });
+}
+
+function copyable(v) {
+  const escaped = esc(v);
+  return '<span class="mono copyable" onclick="navigator.clipboard.writeText(\'' + escaped.replace(/'/g, "\\'") + '\')" title="Click to copy">' + escaped + '</span>';
+}
+
+async function deleteBackup(type, filename) {
+  if (!confirm('Delete ' + filename + '?')) return;
+  try {
+    const r = await fetch('/api/backup/' + type + '/' + encodeURIComponent(filename), { method: 'DELETE' });
+    const data = await r.json();
+    if (data.ok) {
+      await new Promise(r => setTimeout(r, 6000));
+      await refresh();
+    } else {
+      alert('Delete failed: ' + (data.error || 'unknown error'));
+    }
+  } catch(e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+async function refresh() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true; btn.textContent = 'Refreshing...';
+  try {
+    const r = await fetch('/data/dynamic.json?t=' + Date.now());
+    if (r.ok) D = await r.json();
+  } catch(e) {}
+  render();
+  btn.disabled = false; btn.textContent = 'Refresh Now';
+}
+
+function renderTable(title, backups, type) {
+  if (!backups || backups.length === 0) {
+    return '<h2>' + esc(title) + '</h2><div class="empty">No backups yet. Run <code>make backup-' + type + '</code> to create one.</div>';
+  }
+
+  let h = '<h2>' + esc(title) + ' <span class="badge badge-green">' + backups.length + '</span></h2>';
+  h += '<table class="backup-table">';
+  h += '<tr><th>Filename</th><th>Size</th><th>Date</th><th>Download</th><th>Restore</th><th></th></tr>';
+  for (const b of backups) {
+    const restoreCmd = 'make restore-' + type + ' BACKUP_NAME=' + b.name;
+    const downloadUrl = '/download/' + type + '/' + encodeURIComponent(b.name);
+    h += '<tr id="row-' + esc(b.name) + '">';
+    h += '<td class="mono">' + copyable(b.name) + '</td>';
+    h += '<td>' + esc(b.size) + '</td>';
+    h += '<td>' + esc(b.date) + '</td>';
+    h += '<td><a href="' + downloadUrl + '" class="mono" download>download</a></td>';
+    h += '<td><span class="mono copyable" onclick="navigator.clipboard.writeText(\'' + restoreCmd.replace(/'/g, "\\'") + '\')" title="Click to copy restore command">restore</span></td>';
+    h += '<td><button class="btn-delete" onclick="deleteBackup(\'' + type + '\', \'' + esc(b.name).replace(/'/g, "\\'") + '\')">delete</button></td>';
+    h += '</tr>';
+  }
+  h += '</table>';
+  return h;
+}
+
+function render() {
+  const backups = D?.backups || {};
+
+  document.getElementById('db-section').innerHTML = renderTable('Database Backups', backups.db, 'db');
+  document.getElementById('media-section').innerHTML = renderTable('Media Backups', backups.media, 'media');
+
+  const total = (backups.db?.length || 0) + (backups.media?.length || 0);
+  const age = D ? timeAgo(D.updated) : 'never';
+  document.getElementById('subtitle').innerHTML =
+    total + ' backup(s) total &middot; Updated: ' + age;
+}
+
+refresh();
+setInterval(refresh, 30000);
+setInterval(() => {
+  if (D) {
+    const backups = D?.backups || {};
+    const total = (backups.db?.length || 0) + (backups.media?.length || 0);
+    document.getElementById('subtitle').innerHTML =
+      total + ' backup(s) total &middot; Updated: ' + timeAgo(D.updated);
+  }
+}, 10000);
+</script>
+</body>
+</html>

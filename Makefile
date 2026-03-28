@@ -172,6 +172,15 @@ step-3-deploy: build
 		$(KUBECTL) delete ingressclass nginx || true
 	$(MAKE) step-3
 
+step-4: cluster-dependencies
+	$(call kustomize_apply,deploy/walkthrough/step-4)
+
+step-4-deploy: build
+	@$(KUBECTL) get ingressclass nginx >/dev/null 2>&1 && \
+		echo "Deleting existing IngressClass 'nginx' to avoid Helm conflict..." && \
+		$(KUBECTL) delete ingressclass nginx || true
+	$(MAKE) step-4
+
 # --------------------------------------------------------------------------- #
 # Deploy (production-style)
 # --------------------------------------------------------------------------- #
@@ -187,6 +196,29 @@ deploy-maintenance:
 
 deploy-only:
 	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ./deploy/deploy.sh --skip-build
+
+# --------------------------------------------------------------------------- #
+# Backup & Restore
+# --------------------------------------------------------------------------- #
+
+backup: backup-db backup-media
+
+backup-db:
+	$(KUBECTL) create job --from=cronjob/db-backup db-backup-manual-$$(date +%s)
+	@echo "Database backup job created. Watch with: kubectl get jobs -w"
+
+backup-media:
+	$(KUBECTL) create job --from=cronjob/media-backup media-backup-manual-$$(date +%s)
+	@echo "Media backup job created. Watch with: kubectl get jobs -w"
+
+backup-list:
+	@KUBECTL="$(KUBECTL)" ./deploy/bases/backup/backup.sh list
+
+restore-db:
+	@KUBECTL="$(KUBECTL)" ./deploy/bases/backup/backup.sh restore-db $(BACKUP_NAME)
+
+restore-media:
+	@KUBECTL="$(KUBECTL)" ./deploy/bases/backup/backup.sh restore-media $(BACKUP_NAME)
 
 # --------------------------------------------------------------------------- #
 # Services overview
@@ -232,7 +264,7 @@ endif
 # --------------------------------------------------------------------------- #
 
 destroy:
-	$(KUBECTL) delete -k deploy/walkthrough/step-3 --ignore-not-found
+	$(KUBECTL) delete -k deploy/walkthrough/step-4 --ignore-not-found
 	$(KUBECTL) delete pvc data-db-0 --ignore-not-found
 	$(KUBECTL) delete pvc data-elasticsearch-0 --ignore-not-found
 
@@ -255,4 +287,4 @@ destroy-cluster:
 
 destroy-all: destroy destroy-monitoring destroy-services destroy-cluster
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy destroy-monitoring destroy-services destroy-cluster destroy-all services services-server
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all services services-server

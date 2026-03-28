@@ -20,8 +20,8 @@ make minikube
 # 2. Export Composer auth credentials
 export COMPOSER_AUTH='{"http-basic":{"repo.magento.com":{"username":"...","password":"..."}}}'
 
-# 3. Build and deploy (Magento + Redis + Varnish)
-make step-3-deploy
+# 3. Build and deploy (Magento + Redis + Varnish + Backups)
+make step-4-deploy
 
 # 4. Install log aggregation (Elasticsearch + Kibana)
 make monitoring-kibana
@@ -50,10 +50,11 @@ minikube tunnel
 
 | Target | Description |
 |--------|-------------|
-| `make step-3-deploy` | Build image + deploy full stack (Magento + Redis + Varnish) |
+| `make step-4-deploy` | Build image + deploy full stack (Magento + Redis + Varnish + Backups) |
 | `make step-1` | Minimal: Magento + DB + Elasticsearch |
 | `make step-2` | Step 1 + Redis + HPA |
-| `make step-3` | Step 2 + Varnish (apply only, no build) |
+| `make step-3` | Step 2 + Varnish |
+| `make step-4` | Step 3 + Backup CronJobs (DB + media) |
 | `make build` | Build the Docker image only. Override tag: `make build IMAGE_TAG=v1.2.3` |
 
 ### Deploy (Production-style)
@@ -90,11 +91,32 @@ make services-server                           # default: cleanup on Ctrl+C
 make services-server SERVICES_PERSISTENT=true  # pod stays after Ctrl+C
 ```
 
+### Backup & Restore
+
+Daily automated backups run via CronJobs (DB at 2 AM, media at 3 AM). Keep last 7 by default.
+
+| Target | Description |
+|--------|-------------|
+| `make backup` | Trigger both DB + media backup now |
+| `make backup-db` | Trigger database backup now |
+| `make backup-media` | Trigger media backup now |
+| `make backup-list` | Show available backups with sizes |
+| `make restore-db` | Restore latest database backup |
+| `make restore-media` | Restore latest media backup |
+
+Restore a specific backup: `make restore-db BACKUP_NAME=db-20260328-020000.sql.gz`
+
+Backups are also visible in the services dashboard under the **Backups** page.
+
 ### Teardown
 
 | Target | Description |
 |--------|-------------|
-| `make destroy` | Delete all step-3 resources and PVCs |
+| `make destroy` | Delete all app resources and PVCs |
+| `make destroy-monitoring` | Remove monitoring/logging stack |
+| `make destroy-services` | Remove services dashboard |
+| `make destroy-cluster` | Remove Helm cluster dependencies |
+| `make destroy-all` | Remove everything |
 
 ## Health Checks
 
@@ -200,7 +222,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 ## TODO
 
 - [ ] Custom kustomize overlay path in `deploy.sh`
-- [ ] Backup/restore for database and media
 - [ ] Multi-environment overlay examples (staging, production)
 
 ## Contributing

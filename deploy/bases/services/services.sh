@@ -130,6 +130,35 @@ collect_dynamic() {
     D_PODS_JSON+="{\"name\":\"$(je "$name")\",\"ready\":\"$(je "$ready")\",\"status\":\"$(je "$status")\",\"restarts\":\"$(je "$restarts")\",\"age\":\"$(je "$age")\"}"
   done < <($KUBECTL get pods --no-headers 2>/dev/null || true)
   D_PODS_JSON+="]"
+
+  # Backup listings (from mounted PVC at /backup)
+  D_DB_BACKUPS_JSON="["
+  first=true
+  if [ -d /backup/db ]; then
+    while read -r size month day time name; do
+      [ -z "$name" ] && continue
+      local bname human
+      bname=$(basename "$name")
+      human=$(numfmt --to=iec "$size" 2>/dev/null || echo "${size}B")
+      $first && first=false || D_DB_BACKUPS_JSON+=","
+      D_DB_BACKUPS_JSON+="{\"name\":\"$(je "$bname")\",\"size\":\"$(je "$human")\",\"date\":\"$(je "$month $day $time")\"}"
+    done < <(ls -lt /backup/db/db-*.sql.gz 2>/dev/null | awk '{print $5, $6, $7, $8, $9}')
+  fi
+  D_DB_BACKUPS_JSON+="]"
+
+  D_MEDIA_BACKUPS_JSON="["
+  first=true
+  if [ -d /backup/media ]; then
+    while read -r size month day time name; do
+      [ -z "$name" ] && continue
+      local bname human
+      bname=$(basename "$name")
+      human=$(numfmt --to=iec "$size" 2>/dev/null || echo "${size}B")
+      $first && first=false || D_MEDIA_BACKUPS_JSON+=","
+      D_MEDIA_BACKUPS_JSON+="{\"name\":\"$(je "$bname")\",\"size\":\"$(je "$human")\",\"date\":\"$(je "$month $day $time")\"}"
+    done < <(ls -lt /backup/media/media-*.tar.gz 2>/dev/null | awk '{print $5, $6, $7, $8, $9}')
+  fi
+  D_MEDIA_BACKUPS_JSON+="]"
 }
 
 # =========================================================================== #
@@ -193,6 +222,10 @@ render_json_dynamic() {
     "services_dashboard": "$(je "$D_SVC_SERVICES_DASHBOARD")"
   },
   "k8s_dashboard_svc": "$(je "$D_SVC_K8S_DASHBOARD")",
+  "backups": {
+    "db": $D_DB_BACKUPS_JSON,
+    "media": $D_MEDIA_BACKUPS_JSON
+  },
   "pods": $D_PODS_JSON
 }
 EOF
@@ -394,8 +427,16 @@ serve() {
   echo >&2 "Serve loop started. Static interval: ${static_interval}s, Dynamic interval: ${dynamic_interval}s"
 
   while true; do
-    sleep 30
+    sleep 5
     now=$(date +%s)
+
+    # Check for refresh trigger (e.g. after a delete via API)
+    if [ -f "$data_dir/.refresh" ]; then
+      rm -f "$data_dir/.refresh"
+      collect_dynamic;  render_json_dynamic "$data_dir/dynamic.json"
+      dynamic_last=$now
+      continue
+    fi
 
     if [ $((now - dynamic_last)) -ge "$dynamic_interval" ]; then
       collect_dynamic;  render_json_dynamic "$data_dir/dynamic.json"
@@ -410,11 +451,97 @@ serve() {
 }
 
 # =========================================================================== #
+# API mode — minimal HTTP server for delete operations
+# =========================================================================== #
+
+api() {
+  BACKUP_DIR="${1:-/backup}"
+  DATA_DIR="${2:-/data}"
+  PORT=9090
+
+  echo "API server starting on port $PORT" >&2
+
+  # Write the request handler script (busybox nc -e needs a file)
+  cat > /tmp/api-handler.sh <<'HANDLER'
+#!/bin/sh
+read -r method path _
+
+# Read headers
+while read -r header; do
+  header=$(echo "$header" | tr -d '\r')
+  [ -z "$header" ] && break
+done
+
+response_body='{"ok":false,"error":"not found"}'
+status="404 Not Found"
+
+# Strip \r from path
+path=$(echo "$path" | tr -d '\r')
+
+case "$method" in
+  DELETE)
+    case "$path" in
+      /api/backup/db/*)
+        filename=$(basename "$path")
+        if echo "$filename" | grep -qE '^db-[0-9]{8}-[0-9]{6}\.sql\.gz$'; then
+          if [ -f "$BACKUP_DIR/db/$filename" ]; then
+            rm -f "$BACKUP_DIR/db/$filename"
+            response_body="{\"ok\":true,\"deleted\":\"$filename\"}"
+            status="200 OK"
+            echo "Deleted: db/$filename" >&2; touch "$DATA_DIR/.refresh"
+          fi
+        else
+          response_body='{"ok":false,"error":"invalid filename"}'
+          status="400 Bad Request"
+        fi
+        ;;
+      /api/backup/media/*)
+        filename=$(basename "$path")
+        if echo "$filename" | grep -qE '^media-[0-9]{8}-[0-9]{6}\.tar\.gz$'; then
+          if [ -f "$BACKUP_DIR/media/$filename" ]; then
+            rm -f "$BACKUP_DIR/media/$filename"
+            response_body="{\"ok\":true,\"deleted\":\"$filename\"}"
+            status="200 OK"
+            echo "Deleted: media/$filename" >&2; touch "$DATA_DIR/.refresh"
+          fi
+        else
+          response_body='{"ok":false,"error":"invalid filename"}'
+          status="400 Bad Request"
+        fi
+        ;;
+    esac
+    ;;
+  OPTIONS)
+    response_body=""
+    status="204 No Content"
+    ;;
+esac
+
+len=$(echo -n "$response_body" | wc -c)
+printf "HTTP/1.1 %s\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: DELETE, OPTIONS\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" \
+  "$status" "$len" "$response_body"
+HANDLER
+
+  chmod +x /tmp/api-handler.sh
+
+  # Export BACKUP_DIR so the handler can use it
+  export BACKUP_DIR DATA_DIR
+
+  # Loop: busybox nc -ll -p PORT -e handler
+  while true; do
+    nc -ll -p "$PORT" -e /tmp/api-handler.sh 2>/dev/null || \
+    nc -l -p "$PORT" -e /tmp/api-handler.sh 2>/dev/null || \
+    { echo "nc failed, retrying..." >&2; sleep 1; }
+  done
+}
+
+# =========================================================================== #
 # Main
 # =========================================================================== #
 
 case "${1:-html}" in
   html)   render_html "${2:-services.html}" ;;
   serve)  serve "${2:-/data}" ;;
-  *)      echo "Usage: $0 {html [file] | serve [dir]}" >&2; exit 1 ;;
+  api)    api "${2:-/backup}" "${3:-/data}" ;;
+  *)      echo "Usage: $0 {html [file] | serve [dir] | api [backup-dir] [data-dir]}" >&2; exit 1 ;;
 esac

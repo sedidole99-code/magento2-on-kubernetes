@@ -46,6 +46,9 @@ spec:
         - name: html
           mountPath: /usr/share/nginx/html/index.html
           subPath: index.html
+        - name: html
+          mountPath: /usr/share/nginx/html/backups.html
+          subPath: backups.html
         - name: data
           mountPath: /usr/share/nginx/html/data
         - name: nginx-conf
@@ -53,6 +56,9 @@ spec:
           subPath: nginx.conf
         - name: auth
           mountPath: /etc/nginx/auth
+          readOnly: true
+        - name: backup
+          mountPath: /backup
           readOnly: true
         resources:
           requests:
@@ -66,6 +72,22 @@ spec:
         volumeMounts:
         - name: scripts
           mountPath: /scripts
+        - name: data
+          mountPath: /data
+        - name: backup
+          mountPath: /backup
+          readOnly: true
+      - name: api
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["sh", "/scripts/services.sh", "api", "/backup", "/data"]
+        ports:
+        - name: api
+          containerPort: 9090
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: backup
+          mountPath: /backup
         - name: data
           mountPath: /data
         resources:
@@ -89,3 +111,6 @@ spec:
         emptyDir: {}
       - name: data
         emptyDir: {}
+      - name: backup
+        persistentVolumeClaim:
+          claimName: backup
