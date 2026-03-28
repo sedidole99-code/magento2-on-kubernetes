@@ -57,6 +57,21 @@ spec:
           value: "false"
         - name: ingest.geoip.downloader.enabled
           value: "false"
+        readinessProbe:
+          httpGet:
+            path: /_cluster/health?local=true
+            port: 9200
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /_cluster/health?local=true
+            port: 9200
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
         volumeMounts:
         - mountPath: /usr/share/elasticsearch/data
           name: data

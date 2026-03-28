@@ -225,7 +225,26 @@ endif
 
 destroy:
 	$(KUBECTL) delete -k deploy/walkthrough/step-3 --ignore-not-found
-	$(KUBECTL) delete pvc data-db-0
-	$(KUBECTL) delete pvc data-elasticsearch-0
+	$(KUBECTL) delete pvc data-db-0 --ignore-not-found
+	$(KUBECTL) delete pvc data-elasticsearch-0 --ignore-not-found
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy services services-server
+destroy-monitoring:
+	$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
+	$(HELM) uninstall fluent-bit 2>/dev/null || true
+	$(HELM) uninstall elasticsearch --no-hooks 2>/dev/null || true
+	$(HELM) uninstall kube-prometheus-stack 2>/dev/null || true
+	$(HELM) uninstall loki 2>/dev/null || true
+	$(KUBECTL) delete pvc -l app=elasticsearch-master --ignore-not-found
+	$(KUBECTL) delete secret elasticsearch-master-certs elasticsearch-master-credentials kibana-kibana-es-token --ignore-not-found
+
+destroy-services:
+	$(KUBECTL) delete -k deploy/bases/services --ignore-not-found
+
+destroy-cluster:
+	$(HELM) uninstall cert-manager 2>/dev/null || true
+	$(HELM) uninstall ingress-nginx 2>/dev/null || true
+	$(HELM) uninstall secret-gsenerator 2>/dev/null || true
+
+destroy-all: destroy destroy-monitoring destroy-services destroy-cluster
+
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy destroy-monitoring destroy-services destroy-cluster destroy-all services services-server

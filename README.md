@@ -199,7 +199,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 ## TODO
 
-- [ ] Health probes for database, Redis, Elasticsearch, Varnish
 - [ ] Custom kustomize overlay path in `deploy.sh`
 - [ ] Backup/restore for database and media
 - [ ] Multi-environment overlay examples (staging, production)
