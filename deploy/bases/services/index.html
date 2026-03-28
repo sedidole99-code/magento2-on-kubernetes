@@ -253,6 +253,20 @@ function render() {
     row('Chart Version', mono(ver.kibana || 'n/a')),
   ], cmd('kubectl port-forward svc/kibana-kibana 5601:5601'));
 
+  // Services Dashboard (this page)
+  html += card('Services Dashboard', [
+    row('URL', link('http://localhost:8080')),
+    row('Service', mono(svc.services_dashboard || 'n/a')),
+    row('Username', copyable('admin')),
+    row('Password', mono('(shown on deploy)')),
+  ], cmd('kubectl port-forward svc/services-dashboard 8080:8080'));
+
+  // Kubernetes Dashboard
+  html += card('Kubernetes Dashboard', [
+    row('URL', '<a href="http://127.0.0.1:9091/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/" target="_blank">http://127.0.0.1:9091/...proxy/</a>'),
+    row('Service', mono(D?.k8s_dashboard_svc || 'n/a')),
+  ], cmd('minikube dashboard --port=9091'));
+
   // Helm releases
   if (S?.helm_releases?.length) {
     const rows = S.helm_releases.map(r => row(r.name, badge('deployed', 'green')));
@@ -265,7 +279,7 @@ function render() {
     row('Pods Running', (D ? D.pods_running + ' / ' + D.pods_total : 'n/a')),
     row('Ingress Host', mono('magento.test')),
     row('TLS', 'Self-signed (cert-manager)'),
-  ], cmd('minikube dashboard'));
+  ]);
 
   document.getElementById('grid').innerHTML = html || '<div class="loading">No data available yet.</div>';
 

@@ -27,3 +27,27 @@ subjects:
 - kind: ServiceAccount
   name: services-dashboard
   namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: services-dashboard
+  namespace: kubernetes-dashboard
+rules:
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: services-dashboard
+  namespace: kubernetes-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: services-dashboard
+subjects:
+- kind: ServiceAccount
+  name: services-dashboard
+  namespace: default

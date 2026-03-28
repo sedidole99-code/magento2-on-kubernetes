@@ -112,6 +112,8 @@ collect_dynamic() {
   D_SVC_GRAFANA=$(svc_endpoint kube-prometheus-stack-grafana)
   D_SVC_PROMETHEUS=$(svc_endpoint kube-prometheus-stack-prometheus)
   D_SVC_KIBANA=$(svc_endpoint kibana-kibana)
+  D_SVC_SERVICES_DASHBOARD=$(svc_endpoint services-dashboard)
+  D_SVC_K8S_DASHBOARD=$($KUBECTL get svc kubernetes-dashboard -n kubernetes-dashboard -o jsonpath='{.spec.clusterIP}:{.spec.ports[0].port}' 2>/dev/null || echo "n/a")
 
   D_PODS_RUNNING=$($KUBECTL get pods --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
   D_PODS_TOTAL=$($KUBECTL get pods --no-headers 2>/dev/null | wc -l | tr -d ' ')
@@ -187,8 +189,10 @@ render_json_dynamic() {
     "varnish": "$(je "$D_SVC_VARNISH")",
     "grafana": "$(je "$D_SVC_GRAFANA")",
     "prometheus": "$(je "$D_SVC_PROMETHEUS")",
-    "kibana": "$(je "$D_SVC_KIBANA")"
+    "kibana": "$(je "$D_SVC_KIBANA")",
+    "services_dashboard": "$(je "$D_SVC_SERVICES_DASHBOARD")"
   },
+  "k8s_dashboard_svc": "$(je "$D_SVC_K8S_DASHBOARD")",
   "pods": $D_PODS_JSON
 }
 EOF
