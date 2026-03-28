@@ -1,0 +1,97 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: magento-alerts
+  labels:
+    app: magento
+    component: monitoring
+spec:
+  groups:
+  - name: magento.pod
+    rules:
+    - alert: MagentoPodRestarting
+      expr: increase(kube_pod_container_status_restarts_total{container="magento-web"}[1h]) > 3
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Magento pod {{ $labels.pod }} is restarting frequently"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last hour."
+
+    - alert: MagentoPodNotReady
+      expr: kube_pod_status_ready{condition="true", pod=~"magento-web.*"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Magento pod {{ $labels.pod }} is not ready"
+        description: "Pod {{ $labels.pod }} has been in a non-ready state for more than 5 minutes."
+
+    - alert: MagentoDeploymentUnavailable
+      expr: kube_deployment_status_replicas_unavailable{deployment="magento-web"} > 0
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Magento deployment has unavailable replicas"
+        description: "{{ $value }} replica(s) of magento-web have been unavailable for more than 10 minutes."
+
+  - name: magento.phpfpm
+    rules:
+    - alert: PHPFPMPoolSaturation
+      expr: phpfpm_active_processes / phpfpm_total_processes > 0.85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "PHP-FPM pool is saturated on {{ $labels.pod }}"
+        description: "PHP-FPM active processes are at {{ $value | humanizePercentage }} of total capacity."
+
+    - alert: PHPFPMSlowRequests
+      expr: rate(phpfpm_slow_requests[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "PHP-FPM slow requests detected on {{ $labels.pod }}"
+        description: "PHP-FPM is logging {{ $value }} slow requests per second."
+
+    - alert: PHPFPMDown
+      expr: phpfpm_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "PHP-FPM is down on {{ $labels.pod }}"
+        description: "The PHP-FPM exporter reports the process as down."
+
+  - name: magento.nginx
+    rules:
+    - alert: NginxHighErrorRate
+      expr: rate(nginx_http_requests_total{code=~"5.."}[5m]) / rate(nginx_http_requests_total[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Nginx 5xx error rate is high on {{ $labels.pod }}"
+        description: "More than 5% of requests are returning 5xx errors."
+
+    - alert: NginxDown
+      expr: nginx_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Nginx is down on {{ $labels.pod }}"
+        description: "The Nginx exporter reports the process as down."
+
+  - name: magento.cron
+    rules:
+    - alert: MagentoCronJobFailing
+      expr: kube_job_status_failed{job_name=~"magento-cron.*"} > 3
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Magento cron jobs are failing"
+        description: "{{ $value }} cron job executions have failed in the last 10 minutes."

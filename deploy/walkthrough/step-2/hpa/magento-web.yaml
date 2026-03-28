@@ -4,7 +4,7 @@ metadata:
   name: magento-web
 spec:
   maxReplicas: 5
-  minReplicas: 3
+  minReplicas: 2
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment

@@ -31,6 +31,9 @@ export COMPOSER_AUTH='{"http-basic":{"repo.magento.com":{"username":"...","passw
 
 # 3. Build the Docker image and deploy with Varnish (recommended)
 make step-3-deploy
+
+# 4. (Optional) Install monitoring stack
+make monitoring
 ```
 
 Once pods are running, open a tunnel to access the site locally:
@@ -60,6 +63,12 @@ You may need to add the ClusterIP to `/etc/hosts`:
 |--------|-------------|
 | `make minikube` | Start a Minikube cluster with required addons (ingress, storage, metrics-server) |
 | `make cluster-dependencies` | Install Helm charts: cert-manager, nginx-ingress, secret-generator |
+
+### Monitoring
+
+| Target | Description |
+|--------|-------------|
+| `make monitoring` | Install Prometheus, Grafana, and Loki log aggregation stack via Helm |
 
 ### Build
 
@@ -359,12 +368,102 @@ jobs:
 | redis | 100m–500m | 256Mi–1Gi | |
 | varnish | 250m–1000m | 512Mi–2Gi | |
 
+## Monitoring & Observability
+
+### Setup
+
+Install the monitoring stack after cluster dependencies:
+
+```bash
+make cluster-dependencies
+make monitoring
+```
+
+This installs:
+- **[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)** — Prometheus, Grafana, Alertmanager, and kube-state-metrics
+- **[Loki + Promtail](https://grafana.github.io/helm-charts)** — log aggregation (collects stdout/stderr from all pods)
+
+### Accessing Dashboards
+
+```bash
+# Grafana (default credentials: admin / admin)
+kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80
+
+# Prometheus
+kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090
+
+# Alertmanager
+kubectl port-forward svc/kube-prometheus-stack-alertmanager 9093:9093
+```
+
+### Metrics Collection
+
+The `magento-web` deployment exposes metrics via two sidecar containers that are
+automatically scraped by Prometheus through `ServiceMonitor` resources:
+
+| Exporter | Port | Metrics Endpoint | Source |
+|----------|------|------------------|--------|
+| `php-metrics-exporter` ([hipages/php-fpm_exporter](https://github.com/hipages/php-fpm_exporter)) | 9253 | `/metrics` | PHP-FPM status (`tcp://127.0.0.1:9001/status`) |
+| `nginx-metrics-exporter` ([nginx-prometheus-exporter](https://github.com/nginxinc/nginx-prometheus-exporter)) | 9113 | `/metrics` | Nginx stub_status (`http://127.0.0.1:6081/stub_status`) |
+
+### Grafana Dashboards
+
+Three dashboards are provisioned automatically as ConfigMaps (labeled
+`grafana_dashboard: "1"` for sidecar auto-discovery):
+
+| Dashboard | UID | Panels |
+|-----------|-----|--------|
+| **Magento Overview** | `magento-overview` | Ready pods, restarts, request rate, 5xx error rate, CPU/memory by pod, HTTP traffic, Nginx connections |
+| **Magento PHP-FPM** | `magento-phpfpm` | FPM up/down, active/idle/total processes, pool saturation %, process history, accepted connections rate, slow requests, listen queue |
+| **Magento Nginx** | `magento-nginx` | Nginx up/down, request rate, active/waiting connections, traffic by pod, connection states (reading/writing/waiting), accepted vs handled rate, dropped connections |
+
+### Log Aggregation with Loki
+
+All application logs (PHP, PHP-FPM, Nginx, Magento) are forwarded to container
+stdout/stderr via supervisord. Promtail collects these automatically and ships
+them to Loki.
+
+To query logs in Grafana, go to **Explore** and select the **Loki** datasource:
+
+```logql
+# All Magento web pod logs
+{app="magento", component="web"}
+
+# Filter for PHP errors
+{app="magento", component="web"} |= "error" != "404"
+
+# Cron job logs
+{job_name=~"magento-cron.*"}
+
+# Install job logs
+{job_name="magento-install"}
+```
+
+### Alerting Rules
+
+A `PrometheusRule` resource (`deploy/bases/monitoring/prometheusrule.yaml`)
+defines alerts across four groups:
+
+| Group | Alert | Severity | Condition |
+|-------|-------|----------|-----------|
+| **Pod** | `MagentoPodRestarting` | warning | >3 restarts in 1h |
+| **Pod** | `MagentoPodNotReady` | critical | Not ready for 5m |
+| **Pod** | `MagentoDeploymentUnavailable` | critical | Unavailable replicas for 10m |
+| **PHP-FPM** | `PHPFPMPoolSaturation` | warning | Active/total processes >85% for 5m |
+| **PHP-FPM** | `PHPFPMSlowRequests` | warning | Slow request rate >0.1/s for 5m |
+| **PHP-FPM** | `PHPFPMDown` | critical | Exporter reports FPM down for 2m |
+| **Nginx** | `NginxHighErrorRate` | warning | 5xx rate >5% for 5m |
+| **Nginx** | `NginxDown` | critical | Exporter reports Nginx down for 2m |
+| **Cron** | `MagentoCronJobFailing` | warning | >3 failed jobs in 10m |
+
+To configure alert notifications (Slack, email, PagerDuty), update the
+Alertmanager configuration in the kube-prometheus-stack Helm values.
+
 ## TODO
 
 - [ ] Add health probes for database, Redis, Elasticsearch, and Varnish
 - [ ] Improve `deploy.sh` to support custom kustomize overlay path (for production overlays)
 - [ ] Add backup/restore procedures for database and media
-- [ ] Add monitoring/observability stack (Prometheus, Grafana) with dashboards for PHP-FPM and Nginx metrics exporters
 - [ ] Add multi-environment overlay examples (staging, production)
 - [ ] Add `imagePullSecrets` support in base deployment manifests
 

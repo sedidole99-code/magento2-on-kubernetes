@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: magento-phpfpm
+  labels:
+    app: magento
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: magento
+      component: web
+  endpoints:
+  - port: php-metrics
+    interval: 15s
+    path: /metrics
+
+---
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: magento-nginx
+  labels:
+    app: magento
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: magento
+      component: web
+  endpoints:
+  - port: nginx-metrics
+    interval: 15s
+    path: /metrics

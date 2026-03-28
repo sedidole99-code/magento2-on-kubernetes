@@ -66,6 +66,40 @@ cluster-dependencies: check-tools
 	$(HELM) upgrade --install secret-gsenerator mittwald/kubernetes-secret-generator
 
 # --------------------------------------------------------------------------- #
+# Monitoring
+# --------------------------------------------------------------------------- #
+
+monitoring: check-tools
+	$(HELM) repo add prometheus-community https://prometheus-community.github.io/helm-charts
+	$(HELM) repo add grafana https://grafana.github.io/helm-charts
+	$(HELM) repo update
+	$(HELM) upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+	  --version 72.9.1 \
+	  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+	  --set prometheus.prometheusSpec.ruleSelectorNilUsesHelmValues=false \
+	  --set grafana.sidecar.dashboards.enabled=true \
+	  --set grafana.sidecar.dashboards.label=grafana_dashboard \
+	  --set grafana.sidecar.dashboards.searchNamespace=ALL \
+	  --set grafana.service.type=ClusterIP \
+	  --set grafana.adminPassword=admin \
+	  --set grafana.additionalDataSources[0].name=Loki \
+	  --set grafana.additionalDataSources[0].type=loki \
+	  --set grafana.additionalDataSources[0].url=http://loki:3100 \
+	  --set grafana.additionalDataSources[0].access=proxy \
+	  --set grafana.additionalDataSources[0].isDefault=false
+	$(HELM) upgrade --install loki grafana/loki-stack \
+	  --set loki.persistence.enabled=false \
+	  --set promtail.enabled=true \
+	  --set grafana.enabled=false \
+	  --set loki.isDefault=false
+	$(KUSTOMIZE) build deploy/bases/monitoring | $(KUBECTL) apply -f -
+	@echo ""
+	@echo "Monitoring stack installed."
+	@echo "  Grafana:    kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80"
+	@echo "  Prometheus: kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090"
+	@echo "  Grafana credentials: admin / admin"
+
+# --------------------------------------------------------------------------- #
 # Build
 # --------------------------------------------------------------------------- #
 
@@ -120,8 +154,8 @@ deploy-only:
 # --------------------------------------------------------------------------- #
 
 destroy:
-	$(KUBECTL) delete -k deploy/step-3
+	$(KUBECTL) delete -k deploy/walkthrough/step-3
 	$(KUBECTL) delete pvc data-db-0
 	$(KUBECTL) delete pvc data-elasticsearch-0
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy
