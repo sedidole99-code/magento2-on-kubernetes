@@ -264,9 +264,11 @@ endif
 # --------------------------------------------------------------------------- #
 
 destroy:
-	$(KUBECTL) delete -k deploy/walkthrough/step-4 --ignore-not-found
-	$(KUBECTL) delete pvc data-db-0 --ignore-not-found
-	$(KUBECTL) delete pvc data-elasticsearch-0 --ignore-not-found
+	@$(KUSTOMIZE) build deploy/walkthrough/step-4 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || \
+		$(KUSTOMIZE) build deploy/walkthrough/step-3 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || \
+		$(KUSTOMIZE) build deploy/walkthrough/step-2 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || \
+		$(KUSTOMIZE) build deploy/walkthrough/step-1 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || true
+	$(KUBECTL) delete pvc data-db-0 data-elasticsearch-0 --ignore-not-found --wait=false
 
 destroy-monitoring:
 	$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
