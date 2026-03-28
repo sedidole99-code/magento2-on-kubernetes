@@ -189,6 +189,14 @@ deploy-only:
 	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ./deploy/deploy.sh --skip-build
 
 # --------------------------------------------------------------------------- #
+# Services overview
+# --------------------------------------------------------------------------- #
+
+services:
+	KUBECTL="$(KUBECTL)" HELM="$(HELM)" MINIKUBE="$(MINIKUBE)" ./deploy/services.sh services.html
+	@xdg-open services.html 2>/dev/null || open services.html 2>/dev/null || echo "Open services.html in your browser"
+
+# --------------------------------------------------------------------------- #
 # Teardown
 # --------------------------------------------------------------------------- #
 
@@ -197,4 +205,4 @@ destroy:
 	$(KUBECTL) delete pvc data-db-0
 	$(KUBECTL) delete pvc data-elasticsearch-0
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy services
