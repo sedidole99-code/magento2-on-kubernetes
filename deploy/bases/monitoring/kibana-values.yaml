@@ -1,0 +1,13 @@
+elasticsearchHosts: "https://elasticsearch-master:9200"
+protocol: https
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+kibanaConfig:
+  kibana.yml: |
+    server.host: "0.0.0.0"
+    elasticsearch.hosts: ["https://elasticsearch-master:9200"]
+    elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca.crt"]

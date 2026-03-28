@@ -1,0 +1,10 @@
+replicas: 1
+minimumMasterNodes: 1
+persistence:
+  enabled: true
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    memory: 2Gi

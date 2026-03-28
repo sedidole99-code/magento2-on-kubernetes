@@ -64,11 +64,14 @@ You may need to add the ClusterIP to `/etc/hosts`:
 | `make minikube` | Start a Minikube cluster with required addons (ingress, storage, metrics-server) |
 | `make cluster-dependencies` | Install Helm charts: cert-manager, nginx-ingress, secret-generator |
 
-### Monitoring
+### Monitoring & Logging
 
 | Target | Description |
 |--------|-------------|
-| `make monitoring` | Install Prometheus, Grafana, and Loki log aggregation stack via Helm |
+| `make monitoring` | Install Prometheus + Grafana (metrics, dashboards, alerts) |
+| `make logging-loki` | Install Loki + Promtail (log aggregation via Grafana Explore) |
+| `make monitoring-loki-datasource` | Add Loki as a datasource in Grafana (run after `logging-loki`) |
+| `make monitoring-kibana` | Install Elasticsearch + Fluentbit + Kibana (log aggregation via Kibana) |
 
 ### Build
 
@@ -372,16 +375,26 @@ jobs:
 
 ### Setup
 
-Install the monitoring stack after cluster dependencies:
+Install the monitoring stack after deploying Magento:
 
 ```bash
-make cluster-dependencies
+# Metrics: Prometheus + Grafana (dashboards, alerts)
 make monitoring
+
+# Then choose a logging backend:
+make logging-loki                   # Option A: Loki (logs in Grafana Explore)
+make monitoring-loki-datasource     #           Wire Loki into Grafana
+
+make monitoring-kibana                    # Option B: EFK (logs in Kibana)
 ```
 
-This installs:
-- **[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)** — Prometheus, Grafana, Alertmanager, and kube-state-metrics
-- **[Loki + Promtail](https://grafana.github.io/helm-charts)** — log aggregation (collects stdout/stderr from all pods)
+### What Gets Installed
+
+| Command | Components |
+|---------|------------|
+| `make monitoring` | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) (Prometheus, Grafana, Alertmanager, kube-state-metrics) + ServiceMonitors, dashboards, alert rules |
+| `make logging-loki` | [Loki](https://grafana.github.io/helm-charts) + Promtail — collects stdout/stderr from all pods |
+| `make monitoring-kibana` | Elasticsearch + Fluentbit + Kibana — collects stdout/stderr from all pods |
 
 ### Accessing Dashboards
 
@@ -394,6 +407,9 @@ kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090
 
 # Alertmanager
 kubectl port-forward svc/kube-prometheus-stack-alertmanager 9093:9093
+
+# Kibana (if using EFK, credentials: elastic / admin)
+kubectl port-forward svc/kibana-kibana 5601:5601
 ```
 
 ### Metrics Collection
@@ -417,13 +433,14 @@ Three dashboards are provisioned automatically as ConfigMaps (labeled
 | **Magento PHP-FPM** | `magento-phpfpm` | FPM up/down, active/idle/total processes, pool saturation %, process history, accepted connections rate, slow requests, listen queue |
 | **Magento Nginx** | `magento-nginx` | Nginx up/down, request rate, active/waiting connections, traffic by pod, connection states (reading/writing/waiting), accepted vs handled rate, dropped connections |
 
-### Log Aggregation with Loki
+### Log Aggregation
 
 All application logs (PHP, PHP-FPM, Nginx, Magento) are forwarded to container
-stdout/stderr via supervisord. Promtail collects these automatically and ships
-them to Loki.
+stdout/stderr via supervisord. Choose your preferred logging backend:
 
-To query logs in Grafana, go to **Explore** and select the **Loki** datasource:
+#### Option A: Loki (Grafana Explore)
+
+Query logs in Grafana under **Explore** → **Loki** datasource:
 
 ```logql
 # All Magento web pod logs
@@ -438,6 +455,16 @@ To query logs in Grafana, go to **Explore** and select the **Loki** datasource:
 # Install job logs
 {job_name="magento-install"}
 ```
+
+#### Option B: EFK (Kibana)
+
+Open Kibana at `http://localhost:5601` (after port-forward). Create an index
+pattern matching `logstash-*` under **Stack Management** → **Index Patterns**,
+then use **Discover** to search and filter logs:
+
+- Filter by `kubernetes.labels.app: magento` for Magento logs
+- Filter by `kubernetes.container.name: magento-web` for Nginx/PHP logs
+- Use the search bar for full-text search across all fields
 
 ### Alerting Rules
 

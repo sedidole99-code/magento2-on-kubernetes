@@ -71,7 +71,6 @@ cluster-dependencies: check-tools
 
 monitoring: check-tools
 	$(HELM) repo add prometheus-community https://prometheus-community.github.io/helm-charts
-	$(HELM) repo add grafana https://grafana.github.io/helm-charts
 	$(HELM) repo update
 	$(HELM) upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 	  --version 72.9.1 \
@@ -81,29 +80,69 @@ monitoring: check-tools
 	  --set grafana.sidecar.dashboards.label=grafana_dashboard \
 	  --set grafana.sidecar.dashboards.searchNamespace=ALL \
 	  --set grafana.service.type=ClusterIP \
-	  --set grafana.adminPassword=admin \
-	  --set grafana.additionalDataSources[0].name=Loki \
-	  --set grafana.additionalDataSources[0].type=loki \
-	  --set grafana.additionalDataSources[0].url=http://loki:3100 \
-	  --set grafana.additionalDataSources[0].access=proxy \
-	  --set grafana.additionalDataSources[0].isDefault=false
+	  --set grafana.adminPassword=admin
+	$(KUSTOMIZE) build deploy/bases/monitoring | $(KUBECTL) apply -f -
+	@echo ""
+	@echo "Monitoring stack installed (Prometheus + Grafana)."
+	@echo "  Grafana:    kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80"
+	@echo "  Prometheus: kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090"
+	@echo "  Grafana credentials: admin / admin"
+	@echo ""
+	@echo "For log aggregation, choose one of:"
+	@echo "  make logging-loki   — Loki + Promtail (logs in Grafana Explore)"
+	@echo "  make monitoring-kibana    — Elasticsearch + Fluentbit + Kibana"
+
+logging-loki: check-tools
+	$(HELM) repo add grafana https://grafana.github.io/helm-charts
+	$(HELM) repo update
 	$(HELM) upgrade --install loki grafana/loki-stack \
 	  --set loki.persistence.enabled=false \
 	  --set promtail.enabled=true \
 	  --set grafana.enabled=false \
 	  --set loki.isDefault=false
-	$(KUSTOMIZE) build deploy/bases/monitoring | $(KUBECTL) apply -f -
 	@echo ""
-	@echo "Monitoring stack installed."
-	@echo "  Grafana:    kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80"
-	@echo "  Prometheus: kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090"
-	@echo "  Grafana credentials: admin / admin"
+	@echo "Loki logging stack installed."
+	@echo "To add Loki as a datasource in Grafana, run:"
+	@echo "  make monitoring-loki-datasource"
+
+monitoring-loki-datasource: check-tools
+	$(HELM) upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+	  --version 72.9.1 \
+	  --reuse-values \
+	  --set grafana.additionalDataSources[0].name=Loki \
+	  --set grafana.additionalDataSources[0].type=loki \
+	  --set grafana.additionalDataSources[0].url=http://loki:3100 \
+	  --set grafana.additionalDataSources[0].access=proxy \
+	  --set grafana.additionalDataSources[0].isDefault=false
+	@kubectl delete pod -l app.kubernetes.io/name=grafana 2>/dev/null || true
+	@echo ""
+	@echo "Loki datasource added to Grafana. Pod restarted."
+	@echo "  Query logs in Grafana Explore with: {namespace=\"default\"}"
+
+monitoring-kibana: check-tools
+	$(HELM) repo add elastic https://helm.elastic.co
+	$(HELM) repo add fluent https://fluent.github.io/helm-charts
+	$(HELM) repo update
+	$(HELM) upgrade --install elasticsearch elastic/elasticsearch \
+	  -f deploy/bases/monitoring/elasticsearch-values.yaml
+	@echo "Waiting for Elasticsearch to be ready..."
+	$(KUBECTL) rollout status statefulset/elasticsearch-master --timeout=300s
+	$(HELM) upgrade --install fluent-bit fluent/fluent-bit \
+	  -f deploy/bases/monitoring/fluent-bit-values.yaml
+	$(HELM) upgrade --install kibana elastic/kibana \
+	  -f deploy/bases/monitoring/kibana-values.yaml
+	@echo ""
+	@echo "EFK logging stack installed."
+	@echo "  Kibana:          kubectl port-forward svc/kibana-kibana 5601:5601"
+	@echo "  Kibana credentials: elastic / <password from secret>"
+	@echo "  Get password:    kubectl get secret elasticsearch-master-credentials -o jsonpath='{.data.password}' | base64 -d; echo"
 
 # --------------------------------------------------------------------------- #
 # Build
 # --------------------------------------------------------------------------- #
 
 build: check-tools check-composer-auth
+	eval $$($(MINIKUBE) docker-env 2>/dev/null || true) && \
 	cd src && IMAGE_NAME="$(IMAGE_REPO):$(IMAGE_TAG)" DOCKERFILE_PATH=Dockerfile ./hooks/build
 
 # --------------------------------------------------------------------------- #
@@ -154,8 +193,8 @@ deploy-only:
 # --------------------------------------------------------------------------- #
 
 destroy:
-	$(KUBECTL) delete -k deploy/walkthrough/step-3
+	$(KUBECTL) delete -k deploy/walkthrough/step-3 --ignore-not-found
 	$(KUBECTL) delete pvc data-db-0
 	$(KUBECTL) delete pvc data-elasticsearch-0
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy deploy deploy-zero deploy-maintenance deploy-only destroy
