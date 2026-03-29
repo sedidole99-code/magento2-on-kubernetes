@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: staging
+
+namespace: staging
+
+resources:
+- ../../walkthrough/step-4
+
+patchesStrategicMerge:
+- patches/magento-web.yaml
+- patches/ingress.yaml
+
+configMapGenerator:
+- name: config
+  behavior: merge
+  envs:
+  - config/common.env

@@ -7,12 +7,18 @@
 <style>
   :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --green: #4ade80; --yellow: #fbbf24; --red: #f87171; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: var(--bg); color: var(--text); padding: 2rem; line-height: 1.6; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: var(--bg); color: var(--text); padding: 0; line-height: 1.6; }
 
-  header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
-  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
-  .subtitle { color: var(--muted); font-size: 0.85rem; }
-  .controls { display: flex; align-items: center; gap: 1rem; }
+  nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  .nav-brand { font-weight: 700; font-size: 1rem; color: var(--accent); padding: 0.75rem 0; margin-right: 2rem; }
+  .nav-tabs { display: flex; gap: 0; }
+  .nav-tab { padding: 0.75rem 1.25rem; color: var(--muted); text-decoration: none; font-size: 0.85rem; border-bottom: 2px solid transparent; transition: all 0.2s; cursor: pointer; }
+  .nav-tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .nav-right { display: flex; align-items: center; gap: 1rem; }
+  .nav-status { font-size: 0.75rem; color: var(--muted); }
+
+  .content { padding: 2rem; }
   .btn { background: var(--card); border: 1px solid var(--border); color: var(--accent); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: border-color 0.2s; }
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -28,11 +34,8 @@
   .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; }
   .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
   .badge-green { background: rgba(74,222,128,0.15); color: var(--green); }
-  .badge-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
 
   .empty { color: var(--muted); padding: 1.5rem; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
-  .btn-delete { background: transparent; border: 1px solid var(--red); color: var(--red); padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-family: inherit; }
-  .btn-delete:hover { background: rgba(248,113,113,0.15); }
 
   .cmd { background: #0f172a; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.75rem; font-size: 0.8rem; font-family: monospace; color: var(--green); margin-top: 0.75rem; display: block; cursor: pointer; position: relative; }
   .cmd:hover { border-color: var(--accent); }
@@ -41,36 +44,51 @@
 
   .copyable { cursor: pointer; border-bottom: 1px dashed var(--border); }
   .copyable:hover { color: var(--accent); }
+
+  .btn-delete { background: transparent; border: 1px solid var(--red); color: var(--red); padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-family: inherit; }
+  .btn-delete:hover { background: rgba(248,113,113,0.15); }
+
+  .nav-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .nav-dot.online { background: var(--green); }
+  .nav-dot.offline { background: var(--border); }
 </style>
 </head>
 <body>
 
-<header>
-  <div>
-    <h1>m2kube — Backups</h1>
-    <p class="subtitle" id="subtitle">Loading...</p>
+<nav>
+  <div style="display:flex;align-items:center">
+    <span class="nav-brand">m2kube</span>
+    <div class="nav-tabs">
+      <a class="nav-tab" href="/">Dev</a>
+      <a class="nav-tab" href="/?env=staging">Stage</a>
+      <a class="nav-tab" href="/?env=production">Prod</a>
+      <a class="nav-tab active"><span class="nav-dot online"></span>Backups</a>
+    </div>
   </div>
-  <div class="controls">
-    <a href="/" class="btn" style="text-decoration:none">Dashboard</a>
-    <button class="btn" id="refresh-btn" onclick="refresh()">Refresh Now</button>
+  <div class="nav-right">
+    <span class="nav-status" id="nav-status"></span>
+    <button class="btn" id="refresh-btn" onclick="refresh()">Refresh</button>
   </div>
-</header>
+</nav>
 
-<div class="section" id="db-section"></div>
-<div class="section" id="media-section"></div>
+<div class="content">
+  <h1 style="font-size:1.2rem;margin-bottom:1.5rem">Backups</h1>
+  <div class="section" id="db-section"></div>
+  <div class="section" id="media-section"></div>
 
-<div class="section">
-  <h2>Manual Backup Commands</h2>
-  <code class="cmd" onclick="copyCmd(this)">make backup-db</code>
-  <code class="cmd" onclick="copyCmd(this)">make backup-media</code>
-  <code class="cmd" onclick="copyCmd(this)">make backup</code>
-</div>
+  <div class="section">
+    <h2>Manual Backup Commands</h2>
+    <code class="cmd" onclick="copyCmd(this)">make backup-db dev</code>
+    <code class="cmd" onclick="copyCmd(this)">make backup-media dev</code>
+    <code class="cmd" onclick="copyCmd(this)">make backup dev</code>
+  </div>
 
-<div class="section">
-  <h2>Restore Commands</h2>
-  <code class="cmd" onclick="copyCmd(this)">make restore-db</code>
-  <code class="cmd" onclick="copyCmd(this)">make restore-media</code>
-  <code class="cmd" id="restore-specific" onclick="copyCmd(this)">make restore-db BACKUP_NAME=&lt;filename&gt;</code>
+  <div class="section">
+    <h2>Restore Commands</h2>
+    <code class="cmd" onclick="copyCmd(this)">make restore-db dev</code>
+    <code class="cmd" onclick="copyCmd(this)">make restore-media dev</code>
+    <code class="cmd" onclick="copyCmd(this)">make restore-db dev BACKUP_NAME=&lt;filename&gt;</code>
+  </div>
 </div>
 
 <script>
@@ -122,25 +140,25 @@ async function refresh() {
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true; btn.textContent = 'Refreshing...';
   try {
-    const r = await fetch('/data/dynamic.json?t=' + Date.now());
+    const r = await fetch('/data/env-default.json?t=' + Date.now());
     if (r.ok) D = await r.json();
   } catch(e) {}
   render();
-  btn.disabled = false; btn.textContent = 'Refresh Now';
+  btn.disabled = false; btn.textContent = 'Refresh';
 }
 
 function renderTable(title, backups, type) {
   if (!backups || backups.length === 0) {
-    return '<h2>' + esc(title) + '</h2><div class="empty">No backups yet. Run <code>make backup-' + type + '</code> to create one.</div>';
+    return '<h2>' + esc(title) + '</h2><div class="empty">No backups yet. Run <code>make backup-' + type + ' dev</code> to create one.</div>';
   }
 
   let h = '<h2>' + esc(title) + ' <span class="badge badge-green">' + backups.length + '</span></h2>';
   h += '<table class="backup-table">';
   h += '<tr><th>Filename</th><th>Size</th><th>Date</th><th>Download</th><th>Restore</th><th></th></tr>';
   for (const b of backups) {
-    const restoreCmd = 'make restore-' + type + ' BACKUP_NAME=' + b.name;
+    const restoreCmd = 'make restore-' + type + ' dev BACKUP_NAME=' + b.name;
     const downloadUrl = '/download/' + type + '/' + encodeURIComponent(b.name);
-    h += '<tr id="row-' + esc(b.name) + '">';
+    h += '<tr>';
     h += '<td class="mono">' + copyable(b.name) + '</td>';
     h += '<td>' + esc(b.size) + '</td>';
     h += '<td>' + esc(b.date) + '</td>';
@@ -155,14 +173,12 @@ function renderTable(title, backups, type) {
 
 function render() {
   const backups = D?.backups || {};
-
   document.getElementById('db-section').innerHTML = renderTable('Database Backups', backups.db, 'db');
   document.getElementById('media-section').innerHTML = renderTable('Media Backups', backups.media, 'media');
 
   const total = (backups.db?.length || 0) + (backups.media?.length || 0);
   const age = D ? timeAgo(D.updated) : 'never';
-  document.getElementById('subtitle').innerHTML =
-    total + ' backup(s) total &middot; Updated: ' + age;
+  document.getElementById('nav-status').textContent = total + ' backup(s) · Updated: ' + age;
 }
 
 refresh();
@@ -171,8 +187,7 @@ setInterval(() => {
   if (D) {
     const backups = D?.backups || {};
     const total = (backups.db?.length || 0) + (backups.media?.length || 0);
-    document.getElementById('subtitle').innerHTML =
-      total + ' backup(s) total &middot; Updated: ' + timeAgo(D.updated);
+    document.getElementById('nav-status').textContent = total + ' backup(s) · Updated: ' + timeAgo(D.updated);
   }
 }, 10000);
 </script>

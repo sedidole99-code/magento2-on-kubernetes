@@ -6,6 +6,56 @@ IMAGE_REPO = mymagento/magento2
 IMAGE_TAG ?= $(shell git rev-parse --short HEAD)$(shell git diff --quiet HEAD 2>/dev/null || echo '-dirty')
 
 # --------------------------------------------------------------------------- #
+# Environment support
+# Usage: make <target> <env>  e.g. make deploy production, make destroy staging
+# Shortcuts: dev/default, stag/staging, prod/production
+# --------------------------------------------------------------------------- #
+
+# Resolve environment from second goal word (make deploy prod → ENV=production)
+ENVS = default dev develop stage staging production prod
+ENV_WORD := $(strip $(filter $(ENVS),$(MAKECMDGOALS)))
+
+# Normalize shortcuts
+ifeq ($(ENV_WORD),dev)
+  override ENV_WORD = default
+else ifeq ($(ENV_WORD),develop)
+  override ENV_WORD = default
+else ifeq ($(ENV_WORD),stage)
+  override ENV_WORD = staging
+else ifeq ($(ENV_WORD),stag)
+  override ENV_WORD = staging
+else ifeq ($(ENV_WORD),prod)
+  override ENV_WORD = production
+endif
+
+# Allow ENV= override for backward compat; ENV_WORD takes precedence
+ENV ?= $(ENV_WORD)
+
+# Resolve namespace and kustomize path
+ifeq ($(ENV),staging)
+  NAMESPACE = staging
+  ENV_KUSTOMIZE_PATH = deploy/overlays/staging
+else ifeq ($(ENV),production)
+  NAMESPACE = production
+  ENV_KUSTOMIZE_PATH = deploy/overlays/production
+else ifeq ($(ENV),default)
+  NAMESPACE = default
+  ENV_KUSTOMIZE_PATH =
+else ifneq ($(ENV),)
+  $(error Unknown environment "$(ENV)". Use: default/dev, staging/stag, production/prod)
+endif
+
+ifneq ($(NAMESPACE),default)
+  NS_FLAG = -n $(NAMESPACE)
+else
+  NS_FLAG =
+endif
+
+# Swallow environment words so make doesn't treat them as targets
+$(filter $(ENVS),$(MAKECMDGOALS)):
+	@true
+
+# --------------------------------------------------------------------------- #
 # Pre-flight checks
 # --------------------------------------------------------------------------- #
 
@@ -38,6 +88,7 @@ minikube: check-tools
 	--extra-config=kubelet.authorization-mode=Webhook \
 	--extra-config=scheduler.bind-address=0.0.0.0 \
 	--extra-config=controller-manager.bind-address=0.0.0.0 --force
+	$(MINIKUBE) ssh -- sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_user_instances=512
 	minikube addons enable ingress
 	minikube addons enable default-storageclass
 	minikube addons enable storage-provisioner
@@ -52,6 +103,10 @@ cluster-dependencies: check-tools
 	--set installCRDs=true \
 	--set ingressShim.defaultIssuerKind=ClusterIssuer \
 	--set ingressShim.defaultIssuerName=selfsigned
+	@$(KUBECTL) get ingressclass nginx >/dev/null 2>&1 && \
+		! $(KUBECTL) get ingressclass nginx -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null | grep -q Helm && \
+		echo "Deleting non-Helm IngressClass 'nginx'..." && \
+		$(KUBECTL) delete ingressclass nginx || true
 	$(HELM) upgrade --install ingress-nginx oci://ghcr.io/nginxinc/charts/nginx-ingress \
   --set controller.kind=daemonset \
   --set controller.enableSnippets=true \
@@ -64,6 +119,16 @@ cluster-dependencies: check-tools
   --set controller.ingressClass.name=nginx \
   --set controller.ingressClass.setAsDefaultIngress=true
 	$(HELM) upgrade --install secret-gsenerator mittwald/kubernetes-secret-generator
+
+check-env:
+ifeq ($(ENV),)
+	$(error Environment required. Usage: make <target> <env>  (dev, staging, prod))
+endif
+
+ensure-namespace:
+ifneq ($(NAMESPACE),default)
+	@$(KUBECTL) get namespace $(NAMESPACE) >/dev/null 2>&1 || $(KUBECTL) create namespace $(NAMESPACE)
+endif
 
 # --------------------------------------------------------------------------- #
 # Monitoring
@@ -154,7 +219,7 @@ build: check-tools check-composer-auth
 define kustomize_apply
 	cp $(1)/kustomization.yaml $(1)/kustomization.yaml.bak
 	cd $(1) && $(KUSTOMIZE) edit set image $(IMAGE_REPO)=$(IMAGE_REPO):$(IMAGE_TAG)
-	$(KUSTOMIZE) build $(1) | $(KUBECTL) apply -f -
+	$(KUSTOMIZE) build $(CURDIR)/$(1) | $(KUBECTL) apply $(NS_FLAG) -f -
 	mv $(1)/kustomization.yaml.bak $(1)/kustomization.yaml
 endef
 
@@ -163,72 +228,82 @@ define wait_for_install
 	@echo ""
 	@echo "Waiting for Magento install job to start (this may take a few minutes)..."
 	@while true; do \
-		RUNNING=$$($(KUBECTL) get pod -l job-name=magento-install -o jsonpath='{.items[0].status.containerStatuses[0].state.running}' 2>/dev/null); \
-		COMPLETED=$$($(KUBECTL) get pod -l job-name=magento-install -o jsonpath='{.items[0].status.containerStatuses[0].state.terminated}' 2>/dev/null); \
+		RUNNING=$$($(KUBECTL) get pod $(NS_FLAG) -l job-name=magento-install -o jsonpath='{.items[0].status.containerStatuses[0].state.running}' 2>/dev/null); \
+		COMPLETED=$$($(KUBECTL) get pod $(NS_FLAG) -l job-name=magento-install -o jsonpath='{.items[0].status.containerStatuses[0].state.terminated}' 2>/dev/null); \
 		if [ -n "$$RUNNING" ] || [ -n "$$COMPLETED" ]; then break; fi; \
 		printf "."; sleep 5; \
 	done
 	@echo ""
 	@echo "Install job running. Following logs:"
 	@echo "--------------------------------------"
-	$(KUBECTL) logs -f job/magento-install -c magento-setup || true
+	$(KUBECTL) logs $(NS_FLAG) -f job/magento-install -c magento-setup || true
 	@echo "--------------------------------------"
 	@echo ""
 	@echo "Waiting for deployment rollout..."
-	@$(KUBECTL) rollout status deployment/magento-web --timeout=600s
+	@$(KUBECTL) rollout status $(NS_FLAG) deployment/magento-web --timeout=600s
 	@echo ""
 	@echo "Magento is ready! Run 'minikube tunnel' to access the site."
 endef
 
-step-1: cluster-dependencies
+step-1: cluster-dependencies check-env ensure-namespace
+ifeq ($(ENV_KUSTOMIZE_PATH),)
 	$(call kustomize_apply,deploy/walkthrough/step-1)
+else
+	$(call kustomize_apply,$(ENV_KUSTOMIZE_PATH)/step-1)
+endif
 
-step-1-deploy: build
-	$(MAKE) step-1
+step-1-deploy: check-env build
+	$(MAKE) step-1 ENV=$(ENV)
 	$(call wait_for_install)
 
-step-2: cluster-dependencies
+step-2: cluster-dependencies check-env ensure-namespace
+ifeq ($(ENV_KUSTOMIZE_PATH),)
 	$(call kustomize_apply,deploy/walkthrough/step-2)
+else
+	$(call kustomize_apply,$(ENV_KUSTOMIZE_PATH)/step-2)
+endif
 
-step-2-deploy: build
-	$(MAKE) step-2
+step-2-deploy: check-env build
+	$(MAKE) step-2 ENV=$(ENV)
 	$(call wait_for_install)
 
-step-3: cluster-dependencies
+step-3: cluster-dependencies check-env ensure-namespace
+ifeq ($(ENV_KUSTOMIZE_PATH),)
 	$(call kustomize_apply,deploy/walkthrough/step-3)
+else
+	$(call kustomize_apply,$(ENV_KUSTOMIZE_PATH)/step-3)
+endif
 
-step-3-deploy: build
-	@$(KUBECTL) get ingressclass nginx >/dev/null 2>&1 && \
-		echo "Deleting existing IngressClass 'nginx' to avoid Helm conflict..." && \
-		$(KUBECTL) delete ingressclass nginx || true
-	$(MAKE) step-3
+step-3-deploy: check-env build
+	$(MAKE) step-3 ENV=$(ENV)
 	$(call wait_for_install)
 
-step-4: cluster-dependencies
+step-4: cluster-dependencies check-env ensure-namespace
+ifeq ($(ENV_KUSTOMIZE_PATH),)
 	$(call kustomize_apply,deploy/walkthrough/step-4)
+else
+	$(call kustomize_apply,$(ENV_KUSTOMIZE_PATH))
+endif
 
-step-4-deploy: build
-	@$(KUBECTL) get ingressclass nginx >/dev/null 2>&1 && \
-		echo "Deleting existing IngressClass 'nginx' to avoid Helm conflict..." && \
-		$(KUBECTL) delete ingressclass nginx || true
-	$(MAKE) step-4
+step-4-deploy: check-env build
+	$(MAKE) step-4 ENV=$(ENV)
 	$(call wait_for_install)
 
 # --------------------------------------------------------------------------- #
 # Deploy (production-style)
 # --------------------------------------------------------------------------- #
 
-deploy: check-composer-auth
-	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ./deploy/deploy.sh
+deploy: check-env check-composer-auth ensure-namespace
+	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ENV="$(ENV)" NAMESPACE="$(NAMESPACE)" NS_FLAG="$(NS_FLAG)" ENV_KUSTOMIZE_PATH="$(ENV_KUSTOMIZE_PATH)" ./deploy/deploy.sh
 
-deploy-zero:
-	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ./deploy/deploy.sh --zero-downtime
+deploy-zero: check-env ensure-namespace
+	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ENV="$(ENV)" NAMESPACE="$(NAMESPACE)" NS_FLAG="$(NS_FLAG)" ENV_KUSTOMIZE_PATH="$(ENV_KUSTOMIZE_PATH)" ./deploy/deploy.sh --zero-downtime
 
-deploy-maintenance:
-	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ./deploy/deploy.sh --maintenance
+deploy-maintenance: check-env ensure-namespace
+	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ENV="$(ENV)" NAMESPACE="$(NAMESPACE)" NS_FLAG="$(NS_FLAG)" ENV_KUSTOMIZE_PATH="$(ENV_KUSTOMIZE_PATH)" ./deploy/deploy.sh --maintenance
 
-deploy-only:
-	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ./deploy/deploy.sh --skip-build
+deploy-only: check-env ensure-namespace
+	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ENV="$(ENV)" NAMESPACE="$(NAMESPACE)" NS_FLAG="$(NS_FLAG)" ENV_KUSTOMIZE_PATH="$(ENV_KUSTOMIZE_PATH)" ./deploy/deploy.sh --skip-build
 
 # --------------------------------------------------------------------------- #
 # Backup & Restore
@@ -237,21 +312,21 @@ deploy-only:
 backup: backup-db backup-media
 
 backup-db:
-	$(KUBECTL) create job --from=cronjob/db-backup db-backup-manual-$$(date +%s)
-	@echo "Database backup job created. Watch with: kubectl get jobs -w"
+	$(KUBECTL) $(NS_FLAG) create job --from=cronjob/db-backup db-backup-manual-$$(date +%s)
+	@echo "Database backup job created. Watch with: kubectl get jobs $(NS_FLAG) -w"
 
 backup-media:
-	$(KUBECTL) create job --from=cronjob/media-backup media-backup-manual-$$(date +%s)
-	@echo "Media backup job created. Watch with: kubectl get jobs -w"
+	$(KUBECTL) $(NS_FLAG) create job --from=cronjob/media-backup media-backup-manual-$$(date +%s)
+	@echo "Media backup job created. Watch with: kubectl get jobs $(NS_FLAG) -w"
 
 backup-list:
-	@KUBECTL="$(KUBECTL)" ./deploy/bases/backup/backup.sh list
+	@KUBECTL="$(KUBECTL)" NS_FLAG="$(NS_FLAG)" ./deploy/bases/backup/backup.sh list
 
 restore-db:
-	@KUBECTL="$(KUBECTL)" ./deploy/bases/backup/backup.sh restore-db $(BACKUP_NAME)
+	@KUBECTL="$(KUBECTL)" NS_FLAG="$(NS_FLAG)" ./deploy/bases/backup/backup.sh restore-db $(BACKUP_NAME)
 
 restore-media:
-	@KUBECTL="$(KUBECTL)" ./deploy/bases/backup/backup.sh restore-media $(BACKUP_NAME)
+	@KUBECTL="$(KUBECTL)" NS_FLAG="$(NS_FLAG)" ./deploy/bases/backup/backup.sh restore-media $(BACKUP_NAME)
 
 # --------------------------------------------------------------------------- #
 # Services overview
@@ -296,12 +371,16 @@ endif
 # Teardown
 # --------------------------------------------------------------------------- #
 
-destroy:
-	@$(KUSTOMIZE) build deploy/walkthrough/step-4 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || \
-		$(KUSTOMIZE) build deploy/walkthrough/step-3 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || \
-		$(KUSTOMIZE) build deploy/walkthrough/step-2 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || \
-		$(KUSTOMIZE) build deploy/walkthrough/step-1 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false || true
-	$(KUBECTL) delete pvc data-db-0 data-elasticsearch-0 data-rabbitmq-0 --ignore-not-found --wait=false
+destroy: check-env ensure-namespace
+ifneq ($(ENV_KUSTOMIZE_PATH),)
+	@$(KUSTOMIZE) build $(ENV_KUSTOMIZE_PATH) 2>/dev/null | $(KUBECTL) delete $(NS_FLAG) -f - --ignore-not-found --wait=false 2>/dev/null || true
+else
+	@$(KUSTOMIZE) build deploy/walkthrough/step-4 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || \
+		$(KUSTOMIZE) build deploy/walkthrough/step-3 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || \
+		$(KUSTOMIZE) build deploy/walkthrough/step-2 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || \
+		$(KUSTOMIZE) build deploy/walkthrough/step-1 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || true
+endif
+	$(KUBECTL) delete pvc $(NS_FLAG) data-db-0 data-elasticsearch-0 data-rabbitmq-0 --ignore-not-found --wait=false
 
 destroy-monitoring:
 	$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
@@ -313,13 +392,42 @@ destroy-monitoring:
 	$(KUBECTL) delete secret elasticsearch-master-certs elasticsearch-master-credentials kibana-kibana-es-token --ignore-not-found
 
 destroy-services:
-	$(KUBECTL) delete -k deploy/bases/services --ignore-not-found
+	@$(KUSTOMIZE) build deploy/bases/services 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || true
 
 destroy-cluster:
 	$(HELM) uninstall cert-manager 2>/dev/null || true
 	$(HELM) uninstall ingress-nginx 2>/dev/null || true
 	$(HELM) uninstall secret-gsenerator 2>/dev/null || true
 
-destroy-all: destroy destroy-monitoring destroy-services destroy-cluster
+destroy-all: destroy-everything
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-1-deploy step-2 step-2-deploy step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all services services-server
+destroy-everything:
+	@echo "Destroying all environments..."
+	@for ns in default staging production; do \
+		echo "--- $$ns ---"; \
+		nf=""; [ "$$ns" != "default" ] && nf="-n $$ns"; \
+		$(KUSTOMIZE) build $(CURDIR)/deploy/overlays/$$ns 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || \
+		$(KUSTOMIZE) build $(CURDIR)/deploy/walkthrough/step-4 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || \
+		$(KUSTOMIZE) build $(CURDIR)/deploy/walkthrough/step-3 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || \
+		$(KUSTOMIZE) build $(CURDIR)/deploy/walkthrough/step-1 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || true; \
+		$(KUBECTL) delete pvc $$nf data-db-0 data-elasticsearch-0 data-rabbitmq-0 --ignore-not-found --wait=false 2>/dev/null || true; \
+	done
+	@echo "--- monitoring ---"
+	@$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
+	@$(HELM) uninstall fluent-bit 2>/dev/null || true
+	@$(HELM) uninstall elasticsearch --no-hooks 2>/dev/null || true
+	@$(HELM) uninstall kube-prometheus-stack 2>/dev/null || true
+	@$(HELM) uninstall loki 2>/dev/null || true
+	@$(KUBECTL) delete pvc -l app=elasticsearch-master --ignore-not-found 2>/dev/null || true
+	@$(KUBECTL) delete secret elasticsearch-master-certs elasticsearch-master-credentials kibana-kibana-es-token --ignore-not-found 2>/dev/null || true
+	@echo "--- services ---"
+	@$(KUSTOMIZE) build $(CURDIR)/deploy/bases/services 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || true
+	@echo "--- cluster ---"
+	@$(HELM) uninstall cert-manager 2>/dev/null || true
+	@$(HELM) uninstall ingress-nginx 2>/dev/null || true
+	@$(HELM) uninstall secret-gsenerator 2>/dev/null || true
+	@echo "--- namespaces ---"
+	@$(KUBECTL) delete namespace staging production --ignore-not-found --wait=false 2>/dev/null || true
+	@echo "All environments and resources destroyed."
+
+.PHONY: check-tools check-composer-auth check-env minikube cluster-dependencies ensure-namespace default dev develop stage staging stag production prod monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-1-deploy step-2 step-2-deploy step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all destroy-everything services services-server

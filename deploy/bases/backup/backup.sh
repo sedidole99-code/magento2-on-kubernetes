@@ -10,6 +10,9 @@
 set -euo pipefail
 
 KUBECTL="${KUBECTL:-kubectl}"
+if [ -n "${NS_FLAG:-}" ]; then
+  KUBECTL="$KUBECTL $NS_FLAG"
+fi
 BUSYBOX="busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f"
 PERCONA="percona:8.0@sha256:5a09f82af8005b1df25cffa7a24472b2eaa57c4dbb355c050e24b2dd062e1005"
 

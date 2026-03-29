@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: main
+spec:
+  rules:
+  - host: staging.magento.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: magento-web
+            port:
+              name: http
+  tls:
+  - hosts:
+    - staging.magento.test
+    secretName: magento-staging

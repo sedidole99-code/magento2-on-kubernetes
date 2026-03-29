@@ -4,48 +4,24 @@ metadata:
   name: services-dashboard
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: services-dashboard
 rules:
 - apiGroups: [""]
-  resources: ["secrets", "pods", "services"]
+  resources: ["secrets", "pods", "services", "namespaces"]
   verbs: ["get", "list"]
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets"]
   verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: services-dashboard
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: services-dashboard
-subjects:
-- kind: ServiceAccount
-  name: services-dashboard
-  namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: services-dashboard
-  namespace: kubernetes-dashboard
-rules:
-- apiGroups: [""]
-  resources: ["services"]
-  verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: services-dashboard
-  namespace: kubernetes-dashboard
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: services-dashboard
 subjects:
 - kind: ServiceAccount

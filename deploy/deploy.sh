@@ -32,6 +32,19 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPLOY_KUSTOMIZE_PATH="${SCRIPT_DIR}/deploy"
 
 IMAGE_REPO="${IMAGE_REPO:-mymagento/magento2}"
+NAMESPACE="${NAMESPACE:-default}"
+NS_FLAG="${NS_FLAG:-}"
+ENV="${ENV:-}"
+
+# Override deploy kustomize path for environment overlays
+if [ -n "$ENV" ] && [ "$ENV" != "default" ]; then
+  DEPLOY_KUSTOMIZE_PATH="${PROJECT_DIR}/deploy/deploy-envs/${ENV}"
+fi
+
+# Bake namespace flag into KUBECTL so all commands are namespace-aware
+if [ -n "$NS_FLAG" ]; then
+  KUBECTL="$KUBECTL $NS_FLAG"
+fi
 
 SKIP_BUILD=false
 FORCE_MODE="auto"

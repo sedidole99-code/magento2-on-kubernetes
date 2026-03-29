@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magento-web
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: magento-web
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: "1"
+            memory: 4Gi
