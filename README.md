@@ -20,8 +20,8 @@ make minikube
 # 2. Export Composer auth credentials
 export COMPOSER_AUTH='{"http-basic":{"repo.magento.com":{"username":"...","password":"..."}}}'
 
-# 3. Build and deploy (Magento + Redis + Varnish + Backups)
-make step-4-deploy
+# 3. Build and deploy — pick the step that fits your needs
+make step-4-deploy   # recommended: full stack with backups
 
 # 4. Install log aggregation (Elasticsearch + Kibana)
 make monitoring-kibana
@@ -29,6 +29,17 @@ make monitoring-kibana
 # 5. Open all dashboards + live services overview
 make services-server
 ```
+
+Each deploy step builds on the previous one. Pick the level you need:
+
+```bash
+make step-1-deploy   # Magento + DB + Elasticsearch
+make step-2-deploy   # + Redis (cache/sessions) + autoscaling
+make step-3-deploy   # + Varnish (full-page cache)
+make step-4-deploy   # + automated backups (recommended)
+```
+
+All deploy targets build the Docker image, apply manifests, follow the install job logs, and wait for the deployment to be ready.
 
 Add `magento.test` to `/etc/hosts` and open a tunnel:
 
@@ -48,14 +59,16 @@ minikube tunnel
 
 ### Build & Deploy (Walkthrough)
 
-| Target | Description |
-|--------|-------------|
-| `make step-4-deploy` | Build image + deploy full stack (Magento + Redis + Varnish + Backups) |
-| `make step-1` | Minimal: Magento + DB + Elasticsearch |
-| `make step-2` | Step 1 + Redis + HPA |
-| `make step-3` | Step 2 + Varnish |
-| `make step-4` | Step 3 + Backup CronJobs (DB + media) |
-| `make build` | Build the Docker image only. Override tag: `make build IMAGE_TAG=v1.2.3` |
+| Target | Components | What it adds |
+|--------|-----------|--------------|
+| `make step-1-deploy` | Magento + DB + Elasticsearch | Base setup |
+| `make step-2-deploy` | + Redis + HPA | Cache, sessions, autoscaling |
+| `make step-3-deploy` | + Varnish | Full-page cache |
+| `make step-4-deploy` | + Backup CronJobs | Automated DB + media backups |
+
+Apply-only targets (no build): `make step-1`, `make step-2`, `make step-3`, `make step-4`
+
+Build image only: `make build` (override tag: `make build IMAGE_TAG=v1.2.3`)
 
 ### Deploy (Production-style)
 

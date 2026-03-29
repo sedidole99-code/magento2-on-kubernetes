@@ -157,11 +157,41 @@ define kustomize_apply
 	git checkout $(1)/kustomization.yaml
 endef
 
+# Helper: wait for install job, follow logs, wait for rollout
+define wait_for_install
+	@echo ""
+	@echo "Waiting for Magento install job to start (this may take a few minutes)..."
+	@while true; do \
+		RUNNING=$$($(KUBECTL) get pod -l job-name=magento-install -o jsonpath='{.items[0].status.containerStatuses[0].state.running}' 2>/dev/null); \
+		COMPLETED=$$($(KUBECTL) get pod -l job-name=magento-install -o jsonpath='{.items[0].status.containerStatuses[0].state.terminated}' 2>/dev/null); \
+		if [ -n "$$RUNNING" ] || [ -n "$$COMPLETED" ]; then break; fi; \
+		printf "."; sleep 5; \
+	done
+	@echo ""
+	@echo "Install job running. Following logs:"
+	@echo "--------------------------------------"
+	$(KUBECTL) logs -f job/magento-install -c magento-setup || true
+	@echo "--------------------------------------"
+	@echo ""
+	@echo "Waiting for deployment rollout..."
+	@$(KUBECTL) rollout status deployment/magento-web --timeout=600s
+	@echo ""
+	@echo "Magento is ready! Run 'minikube tunnel' to access the site."
+endef
+
 step-1: cluster-dependencies
 	$(call kustomize_apply,deploy/walkthrough/step-1)
 
+step-1-deploy: build
+	$(MAKE) step-1
+	$(call wait_for_install)
+
 step-2: cluster-dependencies
 	$(call kustomize_apply,deploy/walkthrough/step-2)
+
+step-2-deploy: build
+	$(MAKE) step-2
+	$(call wait_for_install)
 
 step-3: cluster-dependencies
 	$(call kustomize_apply,deploy/walkthrough/step-3)
@@ -171,6 +201,7 @@ step-3-deploy: build
 		echo "Deleting existing IngressClass 'nginx' to avoid Helm conflict..." && \
 		$(KUBECTL) delete ingressclass nginx || true
 	$(MAKE) step-3
+	$(call wait_for_install)
 
 step-4: cluster-dependencies
 	$(call kustomize_apply,deploy/walkthrough/step-4)
@@ -180,6 +211,7 @@ step-4-deploy: build
 		echo "Deleting existing IngressClass 'nginx' to avoid Helm conflict..." && \
 		$(KUBECTL) delete ingressclass nginx || true
 	$(MAKE) step-4
+	$(call wait_for_install)
 
 # --------------------------------------------------------------------------- #
 # Deploy (production-style)
@@ -289,4 +321,4 @@ destroy-cluster:
 
 destroy-all: destroy destroy-monitoring destroy-services destroy-cluster
 
-.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-2 step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all services services-server
+.PHONY: check-tools check-composer-auth minikube cluster-dependencies monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-1-deploy step-2 step-2-deploy step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all services services-server
