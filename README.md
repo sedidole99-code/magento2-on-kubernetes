@@ -64,7 +64,7 @@ minikube tunnel
 | `make step-1-deploy` | Magento + DB + Elasticsearch | Base setup |
 | `make step-2-deploy` | + Redis + HPA | Cache, sessions, autoscaling |
 | `make step-3-deploy` | + Varnish | Full-page cache |
-| `make step-4-deploy` | + Backup CronJobs | Automated DB + media backups |
+| `make step-4-deploy` | + RabbitMQ + Backup CronJobs | Message queues, automated backups |
 
 Apply-only targets (no build): `make step-1`, `make step-2`, `make step-3`, `make step-4`
 

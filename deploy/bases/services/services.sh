@@ -74,6 +74,10 @@ collect_static() {
   S_IMG_ES=$(pod_image "app=elasticsearch")
   S_IMG_REDIS=$(pod_image "app=redis")
   S_IMG_VARNISH=$(pod_image "app=varnish")
+  S_IMG_RABBITMQ=$(pod_image "app=rabbitmq")
+
+  S_RABBITMQ_USER=$(secret_value rabbitmq-credentials RABBITMQ_DEFAULT_USER)
+  S_RABBITMQ_PASS=$(secret_value rabbitmq-credentials RABBITMQ_DEFAULT_PASS)
 
   # Helm releases (from secrets — works without helm CLI)
   S_HELM_JSON="["
@@ -109,6 +113,7 @@ collect_dynamic() {
   D_SVC_ES=$(svc_endpoint elasticsearch)
   D_SVC_REDIS=$(svc_endpoint redis)
   D_SVC_VARNISH=$(svc_endpoint varnish)
+  D_SVC_RABBITMQ=$(svc_endpoint rabbitmq)
   D_SVC_GRAFANA=$(svc_endpoint kube-prometheus-stack-grafana)
   D_SVC_PROMETHEUS=$(svc_endpoint kube-prometheus-stack-prometheus)
   D_SVC_KIBANA=$(svc_endpoint kibana-kibana)
@@ -186,6 +191,7 @@ render_json_static() {
   "elasticsearch": { "image": "$(je "$S_IMG_ES")" },
   "redis": { "image": "$(je "$S_IMG_REDIS")" },
   "varnish": { "image": "$(je "$S_IMG_VARNISH")" },
+  "rabbitmq": { "user": "$(je "$S_RABBITMQ_USER")", "password": "$(je "$S_RABBITMQ_PASS")", "image": "$(je "$S_IMG_RABBITMQ")" },
   "kibana": { "es_password": "$(je "$S_ES_LOG_PASSWORD")" },
   "helm_releases": $S_HELM_JSON,
   "versions": {
@@ -216,6 +222,7 @@ render_json_dynamic() {
     "elasticsearch": "$(je "$D_SVC_ES")",
     "redis": "$(je "$D_SVC_REDIS")",
     "varnish": "$(je "$D_SVC_VARNISH")",
+    "rabbitmq": "$(je "$D_SVC_RABBITMQ")",
     "grafana": "$(je "$D_SVC_GRAFANA")",
     "prometheus": "$(je "$D_SVC_PROMETHEUS")",
     "kibana": "$(je "$D_SVC_KIBANA")",

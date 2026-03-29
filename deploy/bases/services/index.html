@@ -228,6 +228,17 @@ function render() {
     row('Image', mono(S?.varnish?.image || 'n/a')),
   ]);
 
+  // RabbitMQ
+  html += card('RabbitMQ', [
+    row('Host', mono('rabbitmq:5672')),
+    row('Management UI', link('http://localhost:15672')),
+    row('Service', mono(svc.rabbitmq || 'n/a')),
+    row('Username', copyable(S?.rabbitmq?.user || 'magento')),
+    row('Password', copyable(S?.rabbitmq?.password || 'n/a')),
+    row('Virtual Host', mono('/')),
+    row('Image', mono(S?.rabbitmq?.image || 'n/a')),
+  ], cmd('kubectl port-forward svc/rabbitmq 15672:15672'));
+
   // Grafana
   html += card('Grafana', [
     row('URL', link('http://localhost:3000')),

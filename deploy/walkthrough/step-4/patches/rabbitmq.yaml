@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magento-web
+spec:
+  selector:
+    matchLabels:
+      app: magento
+      component: web
+  template:
+    spec:
+      containers:
+      - name: magento-web
+        env:
+        - name: AMQP_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-credentials
+              key: RABBITMQ_DEFAULT_USER
+        - name: AMQP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-credentials
+              key: RABBITMQ_DEFAULT_PASS
+      initContainers:
+      - name: wait-for-rabbitmq
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Waiting for RabbitMQ..."
+          while ! nc -z rabbitmq 5672; do sleep 2; done
+          echo "RabbitMQ is ready"
+
+---
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: magento-install
+spec:
+  template:
+    spec:
+      containers:
+      - name: magento-setup
+        env:
+        - name: AMQP_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-credentials
+              key: RABBITMQ_DEFAULT_USER
+        - name: AMQP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-credentials
+              key: RABBITMQ_DEFAULT_PASS
+      initContainers:
+      - name: wait-for-rabbitmq
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Waiting for RabbitMQ..."
+          while ! nc -z rabbitmq 5672; do sleep 2; done
+          echo "RabbitMQ is ready"
+
+---
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: magento-cron
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: magento-cron
+            env:
+            - name: AMQP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: RABBITMQ_DEFAULT_USER
+            - name: AMQP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: RABBITMQ_DEFAULT_PASS

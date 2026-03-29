@@ -121,6 +121,16 @@ if (getenv('REDIS_FPC_HOST')) {
     }
 }
 
+if (getenv('AMQP_HOST')) {
+    $env['queue']['amqp'] = [
+        'host' => getenv('AMQP_HOST'),
+        'port' => getenv('AMQP_PORT') ?: '5672',
+        'user' => getenv('AMQP_USER') ?: 'guest',
+        'password' => getenv('AMQP_PASSWORD') ?: 'guest',
+        'virtualhost' => getenv('AMQP_VIRTUALHOST') ?: '/',
+    ];
+}
+
 if (getenv('VARNISH_HOST')) {
     $env['http_cache_hosts'] = [
         [
