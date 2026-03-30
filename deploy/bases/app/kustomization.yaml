@@ -10,6 +10,7 @@ resources:
 - cron/magento.yaml
 - jobs/install.yaml
 - pvc/media.yaml
+- pdb/magento-web.yaml
 
 configMapGenerator:
 - name: nginx

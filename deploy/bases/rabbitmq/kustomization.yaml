@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
 - rabbitmq.yaml
 - credentials.yaml
+- pdb.yaml

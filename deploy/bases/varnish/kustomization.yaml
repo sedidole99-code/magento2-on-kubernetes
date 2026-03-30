@@ -5,6 +5,7 @@ metadata:
 
 resources:
 - varnish.yaml
+- pdb.yaml
 configMapGenerator:
 - name: varnish
   files:

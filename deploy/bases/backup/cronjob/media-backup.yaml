@@ -4,6 +4,7 @@ metadata:
   name: media-backup
 spec:
   schedule: '0 3 * * *'
+  suspend: true
   jobTemplate:
     spec:
       activeDeadlineSeconds: 3600

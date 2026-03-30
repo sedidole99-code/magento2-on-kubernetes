@@ -259,7 +259,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **SecurityContext hardening** — enforce `runAsNonRoot`, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, and `drop: ["ALL"]` capabilities across all pods. The Dockerfile already runs as www-data but Kubernetes doesn't enforce it at the pod level, meaning a compromised container could escalate to root. This is a compliance requirement for most production environments.
 
-- [ ] **PodDisruptionBudgets** — add PDBs with `minAvailable: 1` for database, Elasticsearch, Redis, and RabbitMQ. Without PDBs, `kubectl drain` during node maintenance can evict all replicas simultaneously, causing data loss for stateful services. A 5-line YAML per service that prevents cluster upgrades from causing outages.
+- [x] **PodDisruptionBudgets** — PDBs added for all services. `maxUnavailable: 1` for magento-web (multi-replica via HPA), `minAvailable: 1` for DB, Elasticsearch, Redis, RabbitMQ, and Varnish (prevents eviction of single-replica stateful services during node drains).
 
 - [ ] **NetworkPolicies** — restrict pod-to-pod traffic so only authorized services can communicate. Currently any pod can reach the database on port 3306. Policies should enforce: only magento-web/cron/install → DB, ES, Redis, RabbitMQ; only ingress → varnish/magento-web; only fluent-bit → ES-logging. Blocks lateral movement if any container is compromised.
 

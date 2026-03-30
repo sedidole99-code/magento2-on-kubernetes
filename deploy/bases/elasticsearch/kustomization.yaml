@@ -5,3 +5,4 @@ metadata:
 
 resources:
   - elasticsearch.yaml
+  - pdb.yaml
