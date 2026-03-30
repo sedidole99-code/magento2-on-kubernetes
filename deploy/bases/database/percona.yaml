@@ -92,6 +92,7 @@ spec:
             cpu: 100m
             memory: 1Gi
           limits:
+            cpu: "1"
             memory: 1Gi
         imagePullPolicy: IfNotPresent
       restartPolicy: Always
