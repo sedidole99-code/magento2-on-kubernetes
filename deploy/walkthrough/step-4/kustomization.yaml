@@ -12,7 +12,11 @@ patchesStrategicMerge:
 - patches/rabbitmq.yaml
 
 configMapGenerator:
-- name: additional
-  behavior: merge
+- behavior: merge
   envs:
   - config/additional.env
+  name: additional
+images:
+- name: mymagento/magento2
+  newName: mymagento/magento2
+  newTag: 80c1a9e-dirty

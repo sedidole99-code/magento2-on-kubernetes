@@ -253,45 +253,70 @@ docker push registry.example.com/magento2:v1.2.3
 make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 ```
 
+### What was added
+
+| Area | Original | Current |
+|------|----------|---------|
+| **Deploy steps** | 3 steps (base, Redis, Varnish) | 4 steps (+RabbitMQ, backup CronJobs) |
+| **Deploy strategy** | `kustomize build \| kubectl apply` | Auto-detect zero-downtime vs maintenance-mode (`deploy.sh`) |
+| **Environments** | Single namespace | Multi-env (dev/staging/production) with overlays |
+| **Monitoring** | None | Prometheus + Grafana + dashboards + alerting rules |
+| **Logging** | None | EFK (Elasticsearch + Fluent Bit + Kibana) or Loki |
+| **Backups** | None | Automated DB + media backup CronJobs with rotation |
+| **Services dashboard** | None | Live web UI with credentials, pod status, backup management |
+| **Health probes** | magento-web only | All services (DB, ES, Redis, RabbitMQ, Varnish) |
+| **PDBs** | None | All services protected |
+| **Resource limits** | Partial | All services have explicit requests and limits |
+| **RabbitMQ** | None | Full AMQP integration with `env.docker.php` |
+| **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
+| **Makefile** | 4 targets | 30+ targets with env support, install log streaming |
+| **README** | Minimal | Full docs, troubleshooting, production guide |
+
 ## TODO
 
 ### Critical (security & stability)
 
-- [ ] **SecurityContext hardening** — enforce `runAsNonRoot`, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, and `drop: ["ALL"]` capabilities across all pods. The Dockerfile already runs as www-data but Kubernetes doesn't enforce it at the pod level, meaning a compromised container could escalate to root. This is a compliance requirement for most production environments.
-
-- [ ] **NetworkPolicies** — restrict pod-to-pod traffic so only authorized services can communicate. Currently any pod can reach the database on port 3306. Policies should enforce: only magento-web/cron/install → DB, ES, Redis, RabbitMQ; only ingress → varnish/magento-web; only fluent-bit → ES-logging. Blocks lateral movement if any container is compromised.
+- [ ] **NetworkPolicies** — restrict pod-to-pod traffic so only authorized services can communicate. Currently any pod can reach the database on port 3306. Policies should enforce: only magento-web/cron/install -> DB, ES, Redis, RabbitMQ; only ingress -> varnish/magento-web; only fluent-bit -> ES-logging. Blocks lateral movement if any container is compromised. Note: requires a CNI plugin that supports NetworkPolicies (Calico, Cilium) — minikube's default bridge CNI does not enforce them.
 
 ### High priority (production functionality)
 
-- [ ] **Magento consumer workers** — deploy a dedicated Deployment running `queue:consumers:start` for persistent async processing. Currently RabbitMQ messages are only consumed via the cron job (1-minute cycle, max 1 minute execution), meaning high-volume async operations (bulk imports, email sending, inventory updates) can be severely delayed or dropped. A consumer worker deployment processes queues continuously with configurable parallelism.
+- [ ] **Magento consumer workers** — deploy a dedicated Deployment running `queue:consumers:start` for persistent async processing. Currently RabbitMQ messages are only consumed via the cron job (1-minute cycle, max 1 minute execution), meaning high-volume async operations (bulk imports, email sending, inventory updates) can be severely delayed or dropped. A consumer worker deployment processes queues continuously with configurable parallelism. This is the main reason RabbitMQ was added — without dedicated workers, it's underutilized.
 
-- [ ] **Sealed Secrets / External Secrets** — replace the mittwald secret-generator (which stores plain-text secrets in etcd) with encrypted secret management. [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) encrypts secrets in git using asymmetric crypto (safe to commit), or [External Secrets Operator](https://external-secrets.io/) syncs from AWS Secrets Manager / Vault / GCP Secret Manager. Essential for any production deployment.
+- [ ] **Sealed Secrets / External Secrets** — replace the mittwald secret-generator (which stores plain-text secrets in etcd) with encrypted secret management. [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) encrypts secrets in git using asymmetric crypto (safe to commit), or [External Secrets Operator](https://external-secrets.io/) syncs from AWS Secrets Manager / Vault / GCP Secret Manager. Essential for any production deployment. Also needed for the encryption key (see above).
 
-- [ ] **Pod anti-affinity & topology spread** — add `podAntiAffinity` to prevent multiple replicas of the same service landing on one node, and `topologySpreadConstraints` for multi-zone clusters. Without this, a single node failure can take down all magento-web replicas, all DB replicas, etc. In production with 3+ nodes, this is the difference between zero-downtime and full outage during hardware failures.
+- [ ] **Pod anti-affinity & topology spread** — add `podAntiAffinity` to prevent multiple replicas of the same service landing on one node, and `topologySpreadConstraints` for multi-zone clusters. Without this, a single node failure can take down all magento-web replicas. In production with 3+ nodes, this is the difference between zero-downtime and full outage during hardware failures. Add as a production overlay patch.
 
-- [ ] **Monitoring coverage gaps** — add PrometheusRules for: database replication lag / connection count / slow queries, Redis memory usage / eviction rate / connected clients, RabbitMQ queue depth / consumer count / unacked messages, Elasticsearch cluster health (yellow/red) / JVM heap / disk watermark, PVC usage approaching capacity. Current alerts cover pods and Magento-specific metrics but miss infrastructure health entirely.
+- [ ] **Monitoring coverage gaps** — add PrometheusRules for: database connection count / slow queries, Redis memory usage / eviction rate / connected clients, RabbitMQ queue depth / consumer count / unacked messages, Elasticsearch cluster health (yellow/red) / JVM heap, PVC usage approaching capacity. Current alerts cover pods and Magento-specific metrics but miss infrastructure health entirely.
 
 ### Medium priority (scalability & architecture)
 
-- [ ] **OpenSearch migration** — replace Elasticsearch 7.17 (EOL) with OpenSearch 2.x. Magento 2.4.6+ supports OpenSearch natively via `CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch`. Avoids Elastic licensing restrictions (SSPL), gets active security patches, and is a drop-in replacement. Requires updating the base StatefulSet image, env vars, and health check endpoint.
+- [ ] **OpenSearch migration** — replace Elasticsearch 7.17 (EOL, last patch Dec 2024) with OpenSearch 2.x. Magento 2.4.6+ supports OpenSearch natively via `CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch`. Avoids Elastic licensing restrictions (SSPL), gets active security patches, and is a drop-in replacement. Requires updating the base StatefulSet image, `common.env` search engine config, and health check endpoint.
 
 - [ ] **Media storage on S3** — use Magento's built-in remote storage module (`--remote-storage-driver=aws-s3`) to store `pub/media` on S3/MinIO instead of a shared PVC. The current `ReadWriteOnce` PVC can only be mounted on one node, which blocks multi-zone deployments and makes horizontal scaling of magento-web fragile. S3 also eliminates the need for media backup CronJobs and enables CDN integration.
 
 - [ ] **Horizontal scaling for Varnish** — currently a single Varnish pod is a single point of failure for all cached traffic. Add an HPA and configure VCL for multi-instance caching (consistent hashing or shared storage). Consider using the Varnish `shard` director to distribute cache across pods.
 
-- [ ] **Database read replicas** — add Percona XtraDB Cluster or a ProxySQL sidecar for read/write splitting. Heavy catalog browsing (category pages, layered navigation, search) generates read-heavy queries that can saturate a single MySQL instance. Read replicas offload SELECT queries while the primary handles writes, improving both throughput and failover resilience.
+- [ ] **Database read replicas** — add Percona XtraDB Cluster or a ProxySQL sidecar for read/write splitting. Heavy catalog browsing (category pages, layered navigation, search) generates read-heavy queries that can saturate a single MySQL instance. Read replicas offload SELECT queries while the primary handles writes.
 
-- [ ] **Deploy rollback on failure** — `deploy.sh` currently relies on `kubectl rollout status` exit code but doesn't automatically roll back. Add `kubectl rollout undo deployment/magento-web` on non-zero exit, and consider a pre-deploy snapshot of the database (via the backup CronJob) so failed migrations can be reversed.
+- [ ] **Deploy rollback on failure** — `deploy.sh` currently relies on `kubectl rollout status` exit code but doesn't automatically roll back. Add `kubectl rollout undo deployment/magento-web` on non-zero exit, and trigger a pre-deploy database backup so failed migrations can be reversed.
+
+- [ ] **Redis Full Page Cache separation** — currently Redis uses separate databases (0=cache, 1=FPC, 2=sessions) on a single instance. For production, consider separating FPC into its own Redis instance so a cache flush doesn't affect page cache, and sessions get a dedicated instance with appropriate persistence settings.
 
 ### Nice to have (advanced operations)
 
-- [ ] **Canary deployments** — integrate [Argo Rollouts](https://argoproj.github.io/rollouts/) or [Flagger](https://flagger.app/) for progressive traffic shifting (e.g. 5% → 25% → 100%) with automated rollback based on error rate or latency metrics. Currently deployments are all-or-nothing — a bad release impacts 100% of traffic immediately.
+- [ ] **Canary deployments** — integrate [Argo Rollouts](https://argoproj.github.io/rollouts/) or [Flagger](https://flagger.app/) for progressive traffic shifting (e.g. 5% -> 25% -> 100%) with automated rollback based on error rate or latency metrics. Currently deployments are all-or-nothing — a bad release impacts 100% of traffic immediately.
 
 - [ ] **Startup probes** — add Kubernetes startup probes (separate from liveness) for slow-starting services like Elasticsearch and the Magento setup init container. Startup probes allow longer initial boot times without the liveness probe killing the container during startup. Currently mitigated by high `initialDelaySeconds` but startup probes are more precise.
 
-- [ ] **Graceful shutdown / preStop hooks** — add `preStop` lifecycle hooks to drain connections before pod termination. Magento web pods should run `php bin/magento maintenance:enable` or finish in-flight requests, Varnish should drain its connection pool, and RabbitMQ should stop accepting new messages. Prevents request failures during rolling updates.
+- [ ] **Graceful shutdown / preStop hooks** — add `preStop` lifecycle hooks to drain connections before pod termination. Magento web pods should finish in-flight PHP requests (`sleep 5` or SIGTERM handling), Varnish should drain its connection pool, and RabbitMQ should stop accepting new messages. Prevents 502 errors during rolling updates.
 
 - [ ] **Resource quotas per namespace** — add `ResourceQuota` and `LimitRange` objects to staging/production namespaces to prevent runaway pods from consuming cluster resources. Enforce maximum CPU/memory per namespace and set default requests/limits for pods that don't specify them.
+
+- [ ] **Kustomize deprecation fixes** — replace `patchesStrategicMerge` with `patches`, `patchesJson6902` with `patches`, and `bases` with `resources` across all kustomization files. Current files produce deprecation warnings on every build.
+
+- [ ] **Upgrade Kubernetes version** — Makefile hardcodes `v1.24.0` which is EOL and unsupported by newer minikube versions (requires `--force`). Update to a supported version (v1.28+) and test all manifests for API compatibility. The `autoscaling/v1` HPA and `policy/v1` PDB APIs are stable, but some deprecated fields may need updating.
+
+- [ ] **Slim Docker image** — the production image includes `nano`, `rsync`, and `unzip` which aren't needed at runtime. Removing them reduces attack surface and image size. Consider also adding a `.dockerignore` to exclude test files and docs from the build context.
 
 ## Contributing
 
