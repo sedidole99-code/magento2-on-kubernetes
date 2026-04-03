@@ -127,7 +127,13 @@ make services-server SERVICES_PERSISTENT=true  # pod stays after Ctrl+C
 
 ### Backup & Restore
 
-Daily automated backups run via CronJobs (DB at 2 AM, media at 3 AM). Keep last 7 by default.
+Daily automated DB backups run via CronJob at 2 AM UTC. Media backup CronJob (3 AM UTC) is suspended by default — enable with:
+
+```bash
+kubectl patch cronjob media-backup -p '{"spec":{"suspend":false}}'
+```
+
+Keep last 7 backups by default.
 
 | Target | Description |
 |--------|-------------|
@@ -210,8 +216,12 @@ Alerts defined in `deploy/bases/monitoring/prometheusrule.yaml`:
 |-------|----------|-----------|
 | `MagentoPodRestarting` | warning | >3 restarts in 1h |
 | `MagentoPodNotReady` | critical | Not ready for 5m |
+| `MagentoDeploymentUnavailable` | critical | Replicas unavailable for 10m |
 | `PHPFPMPoolSaturation` | warning | >85% processes used for 5m |
+| `PHPFPMSlowRequests` | warning | Slow request rate >0.1/sec for 5m |
+| `PHPFPMDown` | critical | PHP-FPM exporter reports down |
 | `NginxHighErrorRate` | warning | 5xx rate >5% for 5m |
+| `NginxDown` | critical | Nginx exporter reports down |
 | `MagentoCronJobFailing` | warning | >3 failed jobs in 10m |
 
 ## SSL/TLS
