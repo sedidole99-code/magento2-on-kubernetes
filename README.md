@@ -276,7 +276,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **Services dashboard** | None | Live web UI with credentials, pod status, backup management |
 | **Health probes** | magento-web only | All services (DB, ES, Redis, RabbitMQ, Varnish) |
 | **PDBs** | None | All services protected |
-| **Resource limits** | Partial | All services have explicit requests and limits |
+| **Resource limits** | Partial | All services have explicit requests and limits (a few CPU limits missing — see TODO) |
 | **RabbitMQ** | None | Full AMQP integration with `env.docker.php` |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
 | **Makefile** | 4 targets | 30+ targets with env support, install log streaming |
@@ -322,11 +322,13 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **Resource quotas per namespace** — add `ResourceQuota` and `LimitRange` objects to staging/production namespaces to prevent runaway pods from consuming cluster resources. Enforce maximum CPU/memory per namespace and set default requests/limits for pods that don't specify them.
 
-- [ ] **Kustomize deprecation fixes** — replace `patchesStrategicMerge` with `patches`, `patchesJson6902` with `patches`, and `bases` with `resources` across all kustomization files. Current files produce deprecation warnings on every build.
+- [ ] **Kustomize deprecation fixes** — replace `patchesStrategicMerge` with `patches`, `patchesJson6902` with `patches`, and `bases` with `resources`. Currently 10 of 27 kustomization files still use deprecated syntax (walkthrough steps, overlays, deploy-envs, root). Check all files when fixing as new ones may appear over time. Current files produce deprecation warnings on every build.
 
-- [ ] **Upgrade Kubernetes version** — Makefile hardcodes `v1.24.0` which is EOL and unsupported by newer minikube versions (requires `--force`). Update to a supported version (v1.28+) and test all manifests for API compatibility. The `autoscaling/v1` HPA and `policy/v1` PDB APIs are stable, but some deprecated fields may need updating.
+- [ ] **Upgrade Kubernetes version** — Makefile hardcodes `v1.24.0` which is EOL and unsupported by newer minikube versions (requires `--force`). Update to a supported version (v1.28+) and test all manifests for API compatibility. The `autoscaling/v1` HPA and `policy/v1` PDB APIs are stable, but some deprecated fields may need updating. Also migrate HPA from `autoscaling/v1` to `autoscaling/v2` for memory and custom metrics support.
 
 - [ ] **Slim Docker image** — the production image includes `nano`, `rsync`, and `unzip` which aren't needed at runtime. Removing them reduces attack surface and image size. Consider also adding a `.dockerignore` to exclude test files and docs from the build context.
+
+- [ ] **Missing CPU limits** — RabbitMQ and services dashboard containers (web, api) define CPU requests but no CPU limits. Add explicit CPU limits for consistency and to prevent unbounded CPU usage under load.
 
 ## Contributing
 
