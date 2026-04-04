@@ -18,7 +18,3 @@ configMapGenerator:
   envs:
   - config/common.env
   name: config
-images:
-- name: mymagento/magento2
-  newName: mymagento/magento2
-  newTag: 80c1a9e-dirty

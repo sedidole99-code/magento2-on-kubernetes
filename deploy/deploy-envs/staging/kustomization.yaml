@@ -8,7 +8,3 @@ resources:
 
 patchesStrategicMerge:
 - patches/remove-install-job.yaml
-images:
-- name: mymagento/magento2
-  newName: mymagento/magento2
-  newTag: 80c1a9e-dirty
