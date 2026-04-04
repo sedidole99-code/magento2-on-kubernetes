@@ -109,6 +109,9 @@ if [ "$SKIP_BUILD" = false ]; then
     fail "COMPOSER_AUTH is not set. Export it before running deploy:\n  export COMPOSER_AUTH='{\"http-basic\":{\"repo.magento.com\":{\"username\":\"...\",\"password\":\"...\"}}}'"
   fi
 
+  # Point Docker CLI at minikube's daemon so the image is available to kubelet
+  eval $(minikube docker-env 2>/dev/null || true)
+
   log "Building Docker image..."
   docker build \
     --build-arg COMPOSER_AUTH="$COMPOSER_AUTH" \
