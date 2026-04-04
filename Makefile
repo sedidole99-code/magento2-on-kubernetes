@@ -376,12 +376,14 @@ destroy: check-env ensure-namespace
 ifneq ($(ENV_KUSTOMIZE_PATH),)
 	@$(KUSTOMIZE) build $(ENV_KUSTOMIZE_PATH) 2>/dev/null | $(KUBECTL) delete $(NS_FLAG) -f - --ignore-not-found --wait=false 2>/dev/null || true
 else
-	@$(KUSTOMIZE) build deploy/walkthrough/step-4 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || \
-		$(KUSTOMIZE) build deploy/walkthrough/step-3 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || \
-		$(KUSTOMIZE) build deploy/walkthrough/step-2 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || \
-		$(KUSTOMIZE) build deploy/walkthrough/step-1 2>/dev/null | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null || true
+	@for path in deploy/walkthrough/step-4 deploy/walkthrough/step-3 deploy/walkthrough/step-2 deploy/walkthrough/step-1; do \
+		manifests=$$($(KUSTOMIZE) build $$path 2>/dev/null) && \
+		[ -n "$$manifests" ] && \
+		echo "$$manifests" | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null && \
+		break; \
+	done || true
 endif
-	$(KUBECTL) delete pvc $(NS_FLAG) data-db-0 data-elasticsearch-0 data-rabbitmq-0 --ignore-not-found --wait=false
+	$(KUBECTL) delete pvc $(NS_FLAG) data-db-0 data-elasticsearch-0 data-rabbitmq-0 media --ignore-not-found --wait=false
 
 destroy-monitoring:
 	$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
@@ -407,11 +409,13 @@ destroy-everything:
 	@for ns in default staging production; do \
 		echo "--- $$ns ---"; \
 		nf=""; [ "$$ns" != "default" ] && nf="-n $$ns"; \
-		$(KUSTOMIZE) build $(CURDIR)/deploy/overlays/$$ns 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || \
-		$(KUSTOMIZE) build $(CURDIR)/deploy/walkthrough/step-4 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || \
-		$(KUSTOMIZE) build $(CURDIR)/deploy/walkthrough/step-3 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || \
-		$(KUSTOMIZE) build $(CURDIR)/deploy/walkthrough/step-1 2>/dev/null | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null || true; \
-		$(KUBECTL) delete pvc $$nf data-db-0 data-elasticsearch-0 data-rabbitmq-0 --ignore-not-found --wait=false 2>/dev/null || true; \
+		for path in deploy/overlays/$$ns deploy/walkthrough/step-4 deploy/walkthrough/step-3 deploy/walkthrough/step-1; do \
+			manifests=$$($(KUSTOMIZE) build $(CURDIR)/$$path 2>/dev/null) && \
+			[ -n "$$manifests" ] && \
+			echo "$$manifests" | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null && \
+			break; \
+		done || true; \
+		$(KUBECTL) delete pvc $$nf data-db-0 data-elasticsearch-0 data-rabbitmq-0 media --ignore-not-found --wait=false 2>/dev/null || true; \
 	done
 	@echo "--- monitoring ---"
 	@$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
@@ -426,7 +430,7 @@ destroy-everything:
 	@echo "--- cluster ---"
 	@$(HELM) uninstall cert-manager 2>/dev/null || true
 	@$(HELM) uninstall ingress-nginx 2>/dev/null || true
-	@$(HELM) uninstall secret-gsenerator 2>/dev/null || true
+	@$(HELM) uninstall secret-generator 2>/dev/null || true
 	@echo "--- namespaces ---"
 	@$(KUBECTL) delete namespace staging production --ignore-not-found --wait=false 2>/dev/null || true
 	@echo "All environments and resources destroyed."
