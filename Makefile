@@ -219,8 +219,9 @@ build: check-tools check-composer-auth
 define kustomize_apply
 	cp $(1)/kustomization.yaml $(1)/kustomization.yaml.bak
 	cd $(1) && $(KUSTOMIZE) edit set image $(IMAGE_REPO)=$(IMAGE_REPO):$(IMAGE_TAG)
-	$(KUSTOMIZE) build $(CURDIR)/$(1) | $(KUBECTL) apply $(NS_FLAG) -f -
-	mv $(1)/kustomization.yaml.bak $(1)/kustomization.yaml
+	$(KUSTOMIZE) build $(CURDIR)/$(1) | $(KUBECTL) apply $(NS_FLAG) -f - || \
+		{ mv -f $(1)/kustomization.yaml.bak $(1)/kustomization.yaml; exit 1; }
+	mv -f $(1)/kustomization.yaml.bak $(1)/kustomization.yaml
 endef
 
 # Helper: wait for install job, follow logs, wait for rollout

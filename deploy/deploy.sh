@@ -131,13 +131,17 @@ log "Building deploy manifests..."
 
 # Use kustomize images transformer to override the tag in all resources.
 # Set the image, build manifests, then restore the file so the hardcoded
-# tag never stays in version control.
+# tag never stays in version control. Trap ensures restore on failure/Ctrl+C.
+KUST_BAK="$DEPLOY_KUSTOMIZE_PATH/kustomization.yaml.bak"
+cp "$DEPLOY_KUSTOMIZE_PATH/kustomization.yaml" "$KUST_BAK"
+trap 'mv -f "$KUST_BAK" "$DEPLOY_KUSTOMIZE_PATH/kustomization.yaml" 2>/dev/null || true' EXIT INT TERM
 (cd "$DEPLOY_KUSTOMIZE_PATH" && $KUSTOMIZE edit set image "${IMAGE_REPO}=${NEW_IMAGE}")
 
 MANIFESTS=$($KUSTOMIZE build "$DEPLOY_KUSTOMIZE_PATH")
 
-# Restore kustomization.yaml to avoid committing a hardcoded tag
-git -C "$PROJECT_DIR" checkout "$DEPLOY_KUSTOMIZE_PATH/kustomization.yaml" 2>/dev/null || true
+# Restore kustomization.yaml
+mv -f "$KUST_BAK" "$DEPLOY_KUSTOMIZE_PATH/kustomization.yaml"
+trap - EXIT INT TERM
 
 # Verify the image appears in the built manifests
 if ! echo "$MANIFESTS" | grep -q "$NEW_IMAGE"; then
