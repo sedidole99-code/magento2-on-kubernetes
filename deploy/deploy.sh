@@ -157,6 +157,7 @@ if ! $KUBECTL get deployment magento-web &>/dev/null; then
   echo "$MANIFESTS" | $KUBECTL apply -f -
   log "Waiting for rollout..."
   $KUBECTL rollout status deployment/magento-web --timeout=600s
+  $KUBECTL rollout status deployment/magento-consumer --timeout=600s 2>/dev/null || true
   log "Deploy complete!"
   exit 0
 fi
@@ -229,6 +230,7 @@ if [ "$DEPLOY_MODE" = "--zero-downtime" ]; then
   info "Applying manifests with rolling update..."
   echo "$MANIFESTS" | $KUBECTL apply -f -
   $KUBECTL rollout status deployment/magento-web --timeout=600s
+  $KUBECTL rollout status deployment/magento-consumer --timeout=600s 2>/dev/null || true
 
   log "Post-deploy: flushing cache..."
   POD=$(wait_for_ready_pod) && {
@@ -260,6 +262,11 @@ if [ "$DEPLOY_MODE" = "--maintenance" ]; then
   $KUBECTL scale deployment/magento-web --replicas=0
   $KUBECTL rollout status deployment/magento-web --timeout=120s
 
+  # 2b. Scale down consumer to prevent old code processing messages during upgrade
+  info "Scaling down magento-consumer to 0..."
+  $KUBECTL scale deployment/magento-consumer --replicas=0 2>/dev/null || true
+  $KUBECTL rollout status deployment/magento-consumer --timeout=120s 2>/dev/null || true
+
   # 3. Suspend cron to prevent cron jobs from running during upgrade
   info "Suspending magento-cron..."
   $KUBECTL patch cronjob magento-cron -p '{"spec":{"suspend":true}}' 2>/dev/null || true
@@ -273,6 +280,7 @@ if [ "$DEPLOY_MODE" = "--maintenance" ]; then
   # 5. Wait for rollout (new pods start, init containers handle DB/config upgrades)
   info "Waiting for rollout..."
   $KUBECTL rollout status deployment/magento-web --timeout=600s
+  $KUBECTL rollout status deployment/magento-consumer --timeout=600s 2>/dev/null || true
 
   # 6. Resume cron
   info "Resuming magento-cron..."

@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magento-consumer
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: magento-consumer
+        resources:
+          requests:
+            cpu: 50m
+            memory: 512Mi
+          limits:
+            cpu: 250m
+            memory: 1Gi

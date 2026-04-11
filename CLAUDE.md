@@ -90,8 +90,8 @@ Tests live in `test/e2e/` using Cypress + Cucumber. The single test scenario run
 
 ```
 deploy/
-├── bases/           # 8 independent components (app, database, elasticsearch, redis,
-│                    #   rabbitmq, varnish, backup, monitoring, services)
+├── bases/           # 9 independent components (app, database, elasticsearch, redis,
+│                    #   rabbitmq, varnish, backup, consumer, monitoring, services)
 ├── walkthrough/     # Progressive steps: step-1 → step-2 → step-3 → step-4
 │                    #   Each step references the previous + adds a base
 ├── overlays/        # Environment configs (production, staging, test, kind)
@@ -100,13 +100,17 @@ deploy/
                      #   Install job is immutable — must be deleted before re-creation
 ```
 
-Steps compose progressively: step-1 (app+db+es) → step-2 (+redis+HPA) → step-3 (+varnish, ingress rerouted) → step-4 (+rabbitmq+backups). All overlays build on step-4.
+Steps compose progressively: step-1 (app+db+es) → step-2 (+redis+HPA) → step-3 (+varnish, ingress rerouted) → step-4 (+rabbitmq+consumer workers+backups). All overlays build on step-4.
 
 ### Container Architecture
 
 The `magento-web` pod runs 3 containers + 3 init containers:
 - **Init:** `wait-for-db` (netcat), `wait-for-elasticsearch` (curl), `setup` (runs `setup:upgrade`/`app:config:import` if needed)
 - **Main:** `magento-web` (Nginx + PHP-FPM via supervisord), `php-metrics-exporter`, `nginx-metrics-exporter`
+
+The `magento-consumer` pod (step-4+) runs 1 container + 2 init containers:
+- **Init:** `wait-for-web` (curl health_check.php), `wait-for-rabbitmq` (netcat)
+- **Main:** `magento-consumer` (starts all queue consumers via `queue:consumers:start` with `--max-messages` restart cycle)
 
 ### Configuration Flow
 
@@ -116,13 +120,15 @@ Environment variables flow through layers (later overrides earlier):
 3. ConfigMap `additional` (step-specific: Redis, Varnish, AMQP — merged per step)
 4. Secret `magento-admin` (admin credentials)
 
-At runtime, `src/app/etc/env.docker.php` reads env vars via `getenv()` to build Magento's config array. Magento's `CONFIG__DEFAULT__*` pattern sets admin-locked values from env vars.
+At runtime, `src/app/etc/env.docker.php` reads env vars via `getenv()` to build Magento's config array. Magento's `CONFIG__DEFAULT__*` pattern sets admin-locked values from env vars. When `CRON_CONSUMERS_RUNNER=false` (set in step-4), cron-based consumer running is disabled in favor of the dedicated consumer worker deployment.
 
 ### Smart Deploy (`deploy/deploy.sh`)
 
 Auto-detects strategy by running `setup:db:status` + `app:config:status` against the new image:
 - Both exit 0 → **zero-downtime** rolling update
-- Either non-zero → **maintenance mode** (scale down → upgrade → scale up)
+- Either non-zero → **maintenance mode** (scale down web+consumer → upgrade → scale up)
+
+In maintenance mode, `deploy.sh` scales down both `magento-web` and `magento-consumer`, suspends `magento-cron`, applies new manifests, then waits for all rollouts.
 
 ### Secrets
 

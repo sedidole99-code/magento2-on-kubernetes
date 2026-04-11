@@ -290,7 +290,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 ### High priority (production functionality)
 
-- [ ] **Magento consumer workers** — deploy a dedicated Deployment running `queue:consumers:start` for persistent async processing. Currently RabbitMQ messages are only consumed via the cron job (1-minute cycle, max 1 minute execution), meaning high-volume async operations (bulk imports, email sending, inventory updates) can be severely delayed or dropped. A consumer worker deployment processes queues continuously with configurable parallelism. This is the main reason RabbitMQ was added — without dedicated workers, it's underutilized.
+- [x] **Magento consumer workers** — dedicated `magento-consumer` Deployment running `queue:consumers:start` for all registered consumers with `--max-messages` restart cycle. Deployed in step-4 alongside RabbitMQ. Cron-based consumer running is automatically disabled (`CRON_CONSUMERS_RUNNER=false`). Configurable via `CONSUMERS_MAX_MESSAGES` env var (default: 1000). Production overlay: 2 replicas; staging: 1 replica. `deploy.sh` handles consumer scale-down/up during maintenance-mode deploys.
 
 - [ ] **Sealed Secrets / External Secrets** — replace the mittwald secret-generator (which stores plain-text secrets in etcd) with encrypted secret management. [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) encrypts secrets in git using asymmetric crypto (safe to commit), or [External Secrets Operator](https://external-secrets.io/) syncs from AWS Secrets Manager / Vault / GCP Secret Manager. Essential for any production deployment. Also needed for the encryption key (see above).
 

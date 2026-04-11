@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magento-consumer
+  labels:
+    app: magento
+    component: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: magento
+      component: consumer
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: magento
+        component: consumer
+    spec:
+      initContainers:
+      - name: wait-for-web
+        image: curlimages/curl:8.14.1@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          while ! curl -kILSs --fail -XGET \
+            -H "Host: $(CONFIG__DEFAULT__WEB__COOKIE__COOKIE_DOMAIN)" \
+            $(MAGENTO_WEB_SERVICE_HOST):$(MAGENTO_WEB_SERVICE_PORT_HTTP)/health_check.php
+          do echo "waiting for $(MAGENTO_WEB_SERVICE_HOST)"
+          sleep 1
+          done
+        envFrom:
+        - configMapRef:
+            name: config
+      containers:
+      - name: magento-consumer
+        image: mymagento/magento2:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -e
+          echo "Fetching consumer list..."
+          CONSUMERS=$(php bin/magento queue:consumers:list --no-ansi 2>/dev/null | tr -d '\r')
+          MAX_MESSAGES="${CONSUMERS_MAX_MESSAGES:-1000}"
+          echo "Found $(echo "$CONSUMERS" | wc -l) consumers (max-messages: $MAX_MESSAGES)"
+          while true; do
+            PIDS=""
+            for consumer in $CONSUMERS; do
+              echo "$(date '+%Y-%m-%d %H:%M:%S'): Starting: $consumer"
+              php bin/magento queue:consumers:start "$consumer" --max-messages="$MAX_MESSAGES" &
+              PIDS="$PIDS $!"
+            done
+            wait $PIDS
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Batch complete, restarting in 5s..."
+            sleep 5
+          done
+        env:
+        - name: DB_HOST
+          value: db
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_DATABASE
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_USER
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_PASSWORD
+        envFrom:
+        - configMapRef:
+            name: config
+        - configMapRef:
+            name: additional
+        resources:
+          limits:
+            cpu: 500m
+            memory: 4Gi
+          requests:
+            cpu: 50m
+            memory: 1Gi
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - pgrep -f "queue:consumers:start" > /dev/null || pgrep -f "bin/magento" > /dev/null
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - mountPath: /var/www/html/pub/media
+          name: media
+          subPath: media
+      volumes:
+      - name: media
+        persistentVolumeClaim:
+          claimName: media

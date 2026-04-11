@@ -131,6 +131,14 @@ if (getenv('AMQP_HOST')) {
     ];
 }
 
+if (getenv('CRON_CONSUMERS_RUNNER') === 'false') {
+    $env['cron_consumers_runner'] = [
+        'cron_run' => false,
+        'max_messages' => 0,
+        'consumers' => []
+    ];
+}
+
 if (getenv('VARNISH_HOST')) {
     $env['http_cache_hosts'] = [
         [

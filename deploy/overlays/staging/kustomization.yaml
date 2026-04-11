@@ -10,6 +10,7 @@ resources:
 
 patchesStrategicMerge:
 - patches/magento-web.yaml
+- patches/magento-consumer.yaml
 - patches/ingress.yaml
 
 configMapGenerator:
