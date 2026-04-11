@@ -383,7 +383,9 @@ else
 		break; \
 	done || true
 endif
-	$(KUBECTL) delete pvc $(NS_FLAG) data-db-0 data-elasticsearch-0 data-rabbitmq-0 media --ignore-not-found --wait=false
+	@echo "Waiting for pods to terminate..."
+	$(KUBECTL) delete pods $(NS_FLAG) --all --wait --timeout=60s 2>/dev/null || true
+	$(KUBECTL) delete pvc $(NS_FLAG) --all --wait --timeout=60s 2>/dev/null || true
 
 destroy-monitoring:
 	$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
@@ -415,7 +417,9 @@ destroy-everything:
 			echo "$$manifests" | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null && \
 			break; \
 		done || true; \
-		$(KUBECTL) delete pvc $$nf data-db-0 data-elasticsearch-0 data-rabbitmq-0 media --ignore-not-found --wait=false 2>/dev/null || true; \
+		echo "Waiting for pods to terminate in $$ns..."; \
+		$(KUBECTL) delete pods $$nf --all --wait --timeout=60s 2>/dev/null || true; \
+		$(KUBECTL) delete pvc $$nf --all --wait --timeout=60s 2>/dev/null || true; \
 	done
 	@echo "--- monitoring ---"
 	@$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
@@ -430,7 +434,7 @@ destroy-everything:
 	@echo "--- cluster ---"
 	@$(HELM) uninstall cert-manager 2>/dev/null || true
 	@$(HELM) uninstall ingress-nginx 2>/dev/null || true
-	@$(HELM) uninstall secret-generator 2>/dev/null || true
+	@$(HELM) uninstall secret-gsenerator 2>/dev/null || true
 	@echo "--- namespaces ---"
 	@$(KUBECTL) delete namespace staging production --ignore-not-found --wait=false 2>/dev/null || true
 	@echo "All environments and resources destroyed."
