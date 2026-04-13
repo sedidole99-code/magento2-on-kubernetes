@@ -1,0 +1,361 @@
+# Default deny all ingress and egress traffic in the namespace (baseline security)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-web
+spec:
+  podSelector:
+    matchLabels:
+      app: magento
+      component: web
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # varnish -> magento-web:8081 (PROXY protocol)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 8081
+  # ingress-nginx controller -> magento-web:8080 (direct HTTP when varnish is absent)
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  # magento-cron -> magento-web:8080 (init container wait-for-web health check)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: cron
+    ports:
+    - protocol: TCP
+      port: 8080
+  # magento-consumer -> magento-web:8080 (init container wait-for-web health check)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: consumer
+    ports:
+    - protocol: TCP
+      port: 8080
+  # any pod in namespace -> magento-web:9253,9113 (Prometheus metrics scraping)
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9253
+    - protocol: TCP
+      port: 9113
+  egress:
+  # magento-web -> db:3306 (MySQL)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # magento-web -> elasticsearch:9200 (search engine)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # magento-web -> redis:6379 (cache and session storage)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # magento-web -> rabbitmq:5672 (message queue)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  # magento-web -> varnish:6081 (cache purge requests)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 6081
+  # DNS resolution via kube-system/kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+
+# Ingress controller: receive external traffic, proxy to backends, watch Ingress resources via API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-nginx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: ingress-nginx
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # External traffic (HTTP/HTTPS from any source including NodePort/LoadBalancer)
+  - ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+  egress:
+  # ingress-nginx -> varnish:8080 (step-3+ proxies through varnish)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 8080
+  # ingress-nginx -> magento-web:8080 (direct access in step-1/2, no varnish)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Kubernetes API server (watch Ingress resources, read Secrets for TLS)
+  # After kube-proxy DNAT, Calico sees the real endpoint port, not the Service port (443).
+  # Common API-server ports: 8443 (minikube), 6443 (kubeadm/Kind), 443 (managed K8s).
+  - ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 6443
+    - protocol: TCP
+      port: 8443
+  # DNS resolution via kube-system/kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+
+# Secret generator: watch StringSecret CRDs and create/update Secrets via Kubernetes API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-secret-generator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: secret-gsenerator
+  policyTypes:
+  - Egress
+  egress:
+  # Kubernetes API server (watch StringSecret CRDs, create/update Secret objects)
+  # After kube-proxy DNAT, Calico sees the real endpoint port, not the Service port (443).
+  # Common API-server ports: 8443 (minikube), 6443 (kubeadm/Kind), 443 (managed K8s).
+  - ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 6443
+    - protocol: TCP
+      port: 8443
+  # DNS resolution via kube-system/kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-cron
+spec:
+  podSelector:
+    matchLabels:
+      app: magento
+      component: cron
+  policyTypes:
+  - Egress
+  egress:
+  # magento-cron -> db:3306 (MySQL)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # magento-cron -> elasticsearch:9200 (search indexing)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # magento-cron -> redis:6379 (cache/session access during cron jobs)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # magento-cron -> rabbitmq:5672 (message queue)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  # magento-cron -> magento-web:8080 (init container wait-for-web health check)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    ports:
+    - protocol: TCP
+      port: 8080
+  # DNS resolution via kube-system/kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-install
+spec:
+  podSelector:
+    matchLabels:
+      app: magento
+      component: install
+  policyTypes:
+  - Egress
+  egress:
+  # magento-install -> db:3306 (MySQL)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # magento-install -> elasticsearch:9200 (search engine setup)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # magento-install -> redis:6379 (cache/session config during install + wait-for-redis init)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # magento-install -> rabbitmq:5672 (AMQP config during install + wait-for-rabbitmq init)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  # magento-install -> varnish:6081 (cache purge during install)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 6081
+  # DNS resolution via kube-system/kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

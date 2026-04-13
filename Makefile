@@ -83,6 +83,7 @@ minikube: check-tools
 	--vm-driver=docker \
 	--cpus=4 \
 	--memory=16g \
+	--cni=calico \
 	--bootstrapper=kubeadm \
 	--extra-config=kubelet.authentication-token-webhook=true \
 	--extra-config=kubelet.authorization-mode=Webhook \

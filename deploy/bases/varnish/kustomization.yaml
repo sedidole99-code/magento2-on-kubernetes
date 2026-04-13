@@ -6,6 +6,7 @@ metadata:
 resources:
 - varnish.yaml
 - pdb.yaml
+- networkpolicy.yaml
 configMapGenerator:
 - name: varnish
   files:

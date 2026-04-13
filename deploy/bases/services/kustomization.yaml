@@ -7,6 +7,7 @@ resources:
 - rbac.yaml
 - credentials.yaml
 - backup-pvc.yaml
+- networkpolicy.yaml
 
 configMapGenerator:
 - name: services-dashboard-html

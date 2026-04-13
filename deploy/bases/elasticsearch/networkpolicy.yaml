@@ -1,0 +1,47 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-elasticsearch
+spec:
+  podSelector:
+    matchLabels:
+      app: elasticsearch
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow inbound on port 9200 from Magento components that need search
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: cron
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: install
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: consumer
+    ports:
+    - protocol: TCP
+      port: 9200
+  egress:
+  # Allow DNS resolution via kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

@@ -1,0 +1,171 @@
+# NetworkPolicies for monitoring and logging components
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus
+spec:
+  # Prometheus server: allow scraping metrics from magento-web pods
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes:
+  - Egress
+  egress:
+  # prometheus -> magento-web:9253 (PHP-FPM metrics) and :9113 (Nginx metrics)
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9253
+    - protocol: TCP
+      port: 9113
+  # DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-fluent-bit
+spec:
+  # Fluent Bit DaemonSet: allow sending logs to logging Elasticsearch
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fluent-bit
+  policyTypes:
+  - Egress
+  egress:
+  # fluent-bit -> elasticsearch-master:9200 (log ingestion)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch-master
+    ports:
+    - protocol: TCP
+      port: 9200
+  # DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-elasticsearch-logging
+spec:
+  # Logging Elasticsearch: accept logs from Fluent Bit, queries from Kibana, inter-node traffic
+  podSelector:
+    matchLabels:
+      app: elasticsearch-master
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # fluent-bit -> elasticsearch-master:9200 (log ingestion)
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: fluent-bit
+    ports:
+    - protocol: TCP
+      port: 9200
+  # kibana -> elasticsearch-master:9200 (log queries)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kibana
+    ports:
+    - protocol: TCP
+      port: 9200
+  # elasticsearch-master -> elasticsearch-master:9300 (inter-node cluster communication)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch-master
+    ports:
+    - protocol: TCP
+      port: 9300
+  egress:
+  # elasticsearch-master -> elasticsearch-master:9300 (inter-node cluster communication)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch-master
+    ports:
+    - protocol: TCP
+      port: 9300
+  # DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kibana
+spec:
+  # Kibana: accept browser connections via port-forward, query logging Elasticsearch
+  podSelector:
+    matchLabels:
+      app: kibana
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # browser -> kibana:5601 (kubectl port-forward access, no source restriction)
+  - ports:
+    - protocol: TCP
+      port: 5601
+  egress:
+  # kibana -> elasticsearch-master:9200 (log queries)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch-master
+    ports:
+    - protocol: TCP
+      port: 9200
+  # DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

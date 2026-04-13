@@ -276,6 +276,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **Services dashboard** | None | Live web UI with credentials, pod status, backup management |
 | **Health probes** | magento-web only | All services (DB, ES, Redis, RabbitMQ, Varnish) |
 | **PDBs** | None | All services protected |
+| **NetworkPolicies** | None | Default-deny + per-component allow policies; cross-namespace isolation (requires Calico/Cilium CNI) |
 | **Resource limits** | Partial | All services have explicit requests and limits (a few CPU limits missing — see TODO) |
 | **RabbitMQ** | None | Full AMQP integration with `env.docker.php` |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
@@ -286,7 +287,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 ### Critical (security & stability)
 
-- [ ] **NetworkPolicies** — restrict pod-to-pod traffic so only authorized services can communicate. Currently any pod can reach the database on port 3306. Policies should enforce: only magento-web/cron/install -> DB, ES, Redis, RabbitMQ; only ingress -> varnish/magento-web; only fluent-bit -> ES-logging. Blocks lateral movement if any container is compromised. Note: requires a CNI plugin that supports NetworkPolicies (Calico, Cilium) — minikube's default bridge CNI does not enforce them.
+- [x] **NetworkPolicies** — each base in `deploy/bases/<component>/networkpolicy.yaml` ships a default-deny-all plus explicit `allow-*` policies: only `magento-web|cron|install|consumer|db-backup` can reach DB:3306; only magento workloads reach Redis/RabbitMQ/Elasticsearch; only `ingress-nginx` reaches Varnish/magento-web; DNS egress explicitly allowed to `kube-system/kube-dns`. Policies use bare `podSelector` (no `namespaceSelector`), so each env is network-isolated — a staging pod cannot reach production's DB. Requires a CNI that enforces NetworkPolicies (Calico, Cilium) — `make minikube` passes `--cni=calico`.
 
 ### High priority (production functionality)
 
