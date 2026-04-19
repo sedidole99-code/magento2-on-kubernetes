@@ -100,7 +100,7 @@ cluster-dependencies: check-tools
 	$(HELM) repo add cert-manager https://charts.jetstack.io
 	$(HELM) repo update
 	$(HELM) upgrade --install cert-manager cert-manager/cert-manager \
-	--version v1.12.13 \
+	--version v1.20.2 \
 	--set installCRDs=true \
 	--set ingressShim.defaultIssuerKind=ClusterIssuer \
 	--set ingressShim.defaultIssuerName=selfsigned
@@ -247,6 +247,24 @@ define wait_for_install
 	@echo "Magento is ready! Run 'minikube tunnel' to access the site."
 endef
 
+# Helper: wait_for_install + pause consumer/cron for the install window.
+# Prevents magento-consumer (catalogrule_apply_all, product_action_attribute.update, ...)
+# and magento-cron (indexer_reindex_all_invalid) from racing against the install job's
+# fixture generation and index:reset on the catalog_rule_product indexer.
+# Mirrors the maintenance-mode pattern in deploy/deploy.sh.
+define wait_for_install_with_pause
+	@echo ""
+	@echo "Pausing magento-cron and magento-consumer for install window..."
+	@$(KUBECTL) patch cronjob $(NS_FLAG) magento-cron -p '{"spec":{"suspend":true}}' 2>/dev/null || true
+	@$(KUBECTL) scale $(NS_FLAG) deployment/magento-consumer --replicas=0 2>/dev/null || true
+	$(call wait_for_install)
+	@echo ""
+	@echo "Resuming magento-cron and magento-consumer..."
+	@$(KUBECTL) patch cronjob $(NS_FLAG) magento-cron -p '{"spec":{"suspend":false}}' 2>/dev/null || true
+	@$(KUBECTL) scale $(NS_FLAG) deployment/magento-consumer --replicas=1 2>/dev/null || true
+	@$(KUBECTL) rollout status $(NS_FLAG) deployment/magento-consumer --timeout=120s 2>/dev/null || true
+endef
+
 step-1: cluster-dependencies check-env ensure-namespace
 ifeq ($(ENV_KUSTOMIZE_PATH),)
 	$(call kustomize_apply,deploy/walkthrough/step-1)
@@ -289,7 +307,7 @@ endif
 
 step-4-deploy: check-env build
 	$(MAKE) step-4 ENV=$(ENV)
-	$(call wait_for_install)
+	$(call wait_for_install_with_pause)
 
 # --------------------------------------------------------------------------- #
 # Deploy (production-style)
