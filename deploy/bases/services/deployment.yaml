@@ -65,6 +65,7 @@ spec:
             cpu: 5m
             memory: 16Mi
           limits:
+            cpu: 50m
             memory: 32Mi
       - name: collector
         image: bitnami/kubectl:latest
@@ -77,6 +78,13 @@ spec:
         - name: backup
           mountPath: /backup
           readOnly: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
       - name: api
         image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
         command: ["sh", "/scripts/services.sh", "api", "/backup", "/data"]
@@ -95,6 +103,7 @@ spec:
             cpu: 10m
             memory: 32Mi
           limits:
+            cpu: 100m
             memory: 64Mi
       volumes:
       - name: html

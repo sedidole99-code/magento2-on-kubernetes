@@ -277,7 +277,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **Health probes** | magento-web only | All services (DB, ES, Redis, RabbitMQ, Varnish) |
 | **PDBs** | None | All services protected |
 | **NetworkPolicies** | None | Default-deny + per-component allow policies; cross-namespace isolation (requires Calico/Cilium CNI) |
-| **Resource limits** | Partial | All services have explicit requests and limits (a few CPU limits missing — see TODO) |
+| **Resource limits** | Partial | All services have explicit requests and limits |
 | **RabbitMQ** | None | Full AMQP integration with `env.docker.php` |
 | **Consumer workers** | Cron-based (`consumers_runner`) | Dedicated `magento-consumer` Deployment running `queue:consumers:start` with `--max-messages` restart cycle (cron-based consumer running disabled via `CRON_CONSUMERS_RUNNER=false`) |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
@@ -319,8 +319,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 - [ ] **Resource quotas per namespace** — add `ResourceQuota` and `LimitRange` objects to staging/production namespaces to prevent runaway pods from consuming cluster resources. Enforce maximum CPU/memory per namespace and set default requests/limits for pods that don't specify them.
 
 - [ ] **Slim Docker image** — the production image includes `nano`, `rsync`, and `unzip` which aren't needed at runtime. Removing them reduces attack surface and image size. Consider also adding a `.dockerignore` to exclude test files and docs from the build context.
-
-- [ ] **Missing CPU limits** — RabbitMQ and services dashboard containers (web, api) define CPU requests but no CPU limits. Add explicit CPU limits for consistency and to prevent unbounded CPU usage under load.
 
 ## Contributing
 
