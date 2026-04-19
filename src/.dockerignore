@@ -1,0 +1,8 @@
+.git
+.gitignore
+.editorconfig
+.dockerignore
+hooks/
+**/.DS_Store
+**/node_modules
+**/*.md

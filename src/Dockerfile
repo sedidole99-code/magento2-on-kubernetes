@@ -14,9 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gnupg \
     libxml2-dev \
     libxslt-dev \
     libzip-dev \
-    rsync \
     supervisor \
-    unzip \
     ;
 
 RUN pecl install apcu-5.1.22
@@ -56,6 +54,9 @@ RUN mkdir -p /var/lib/nginx/{body,fastcgi} && \
 
 RUN touch /run/nginx.pid && \
     chown www-data:www-data /run/nginx.pid
+
+RUN mkdir -p /var/www/.local/share/nano && \
+    chown -R www-data:www-data /var/www/.local
 
 FROM base as build
 

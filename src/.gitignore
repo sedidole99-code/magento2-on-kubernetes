@@ -1,5 +1,6 @@
 *
 !.gitignore
+!.dockerignore
 !app/etc/config.php
 !app/etc/env.docker.php
 !composer.json
