@@ -340,10 +340,16 @@ services:
 
 SERVICES_PERSISTENT ?= false
 DASHBOARD_PORT ?= 9091
+SERVICES_PORT ?= 9081
 
 services-server:
 	$(KUSTOMIZE) build deploy/bases/services | $(KUBECTL) apply -f -
-	@$(KUBECTL) rollout status deployment/services-dashboard --timeout=120s
+	@echo "Waiting for services-dashboard-credentials secret to be generated..."
+	@for i in $$(seq 1 60); do \
+		$(KUBECTL) get secret services-dashboard-credentials >/dev/null 2>&1 && break; \
+		sleep 2; \
+	done
+	@$(KUBECTL) rollout status deployment/services-dashboard --timeout=180s
 	@if ! pgrep -xf ".*minikube dashboard --port.*" >/dev/null 2>&1; then \
 		echo "Starting minikube dashboard on port $(DASHBOARD_PORT)..."; \
 		$(MINIKUBE) dashboard --port=$(DASHBOARD_PORT) >/dev/null 2>&1 & \
@@ -351,7 +357,7 @@ services-server:
 	fi
 	@echo ""
 	@echo "Kubernetes dashboard: http://127.0.0.1:$(DASHBOARD_PORT)/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/"
-	@echo "Services dashboard:   http://localhost:8080"
+	@echo "Services dashboard:   http://localhost:$(SERVICES_PORT)"
 	@printf "  Username: " && $(KUBECTL) get secret services-dashboard-credentials -o jsonpath='{.data.username}' | base64 -d && echo ""
 	@printf "  Password: " && $(KUBECTL) get secret services-dashboard-credentials -o jsonpath='{.data.password}' | base64 -d && echo ""
 	@echo ""
@@ -362,7 +368,9 @@ else
 	@echo "Dashboard pod will be removed when port-forward stops."
 endif
 	@echo "Press Ctrl+C to stop"
-	$(KUBECTL) port-forward svc/services-dashboard 8080:8080; \
+	@SERVICES_URL="http://localhost:$(SERVICES_PORT)"; \
+	(sleep 2 && (xdg-open "$$SERVICES_URL" >/dev/null 2>&1 || open "$$SERVICES_URL" >/dev/null 2>&1 || echo "Open $$SERVICES_URL in your browser")) &
+	$(KUBECTL) port-forward svc/services-dashboard $(SERVICES_PORT):8080; \
 	if [ "$(SERVICES_PERSISTENT)" != "true" ]; then \
 		echo "Cleaning up..."; \
 		pkill -f "minikube dashboard --port" 2>/dev/null || true; \
