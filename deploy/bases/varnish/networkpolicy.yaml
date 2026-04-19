@@ -1,0 +1,57 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-varnish
+spec:
+  podSelector:
+    matchLabels:
+      app: varnish
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # ingress-nginx -> varnish:8080
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  # magento-web/install -> varnish:6081 (cache purge)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: install
+    ports:
+    - protocol: TCP
+      port: 6081
+  egress:
+  # varnish -> magento-web:8081 (PROXY protocol backend fetch)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    ports:
+    - protocol: TCP
+      port: 8081
+  # DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

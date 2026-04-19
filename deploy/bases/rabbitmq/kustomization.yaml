@@ -5,3 +5,4 @@ resources:
 - rabbitmq.yaml
 - credentials.yaml
 - pdb.yaml
+- networkpolicy.yaml

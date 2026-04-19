@@ -1,0 +1,7 @@
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: magento-web
+spec:
+  minReplicas: 3
+  maxReplicas: 10

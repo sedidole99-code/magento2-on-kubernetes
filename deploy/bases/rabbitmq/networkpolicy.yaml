@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq
+spec:
+  # Apply to RabbitMQ pods
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow AMQP connections from Magento web, consumer, cron, and install pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: consumer
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: cron
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: install
+    ports:
+    - protocol: TCP
+      port: 5672
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

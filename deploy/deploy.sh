@@ -143,8 +143,11 @@ MANIFESTS=$($KUSTOMIZE build "$DEPLOY_KUSTOMIZE_PATH")
 mv -f "$KUST_BAK" "$DEPLOY_KUSTOMIZE_PATH/kustomization.yaml"
 trap - EXIT INT TERM
 
-# Verify the image appears in the built manifests
-if ! echo "$MANIFESTS" | grep -q "$NEW_IMAGE"; then
+# Verify the image appears in the built manifests.
+# Use bash pattern match rather than `echo | grep -q`: under `set -o pipefail`,
+# grep -q exits early on first match, echo gets SIGPIPE and returns non-zero,
+# which `if !` then inverts so the "not found" branch fires on a true match.
+if [[ "$MANIFESTS" != *"$NEW_IMAGE"* ]]; then
   fail "Image $NEW_IMAGE not found in built manifests"
 fi
 

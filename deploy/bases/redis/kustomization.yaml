@@ -6,3 +6,4 @@ metadata:
 resources:
   - redis.yaml
   - pdb.yaml
+  - networkpolicy.yaml

@@ -97,7 +97,7 @@ spec:
             command:
             - /bin/bash
             - -c
-            - pgrep -f "queue:consumers:start" > /dev/null || pgrep -f "bin/magento" > /dev/null
+            - pidof php > /dev/null
           initialDelaySeconds: 60
           periodSeconds: 30
           timeoutSeconds: 5

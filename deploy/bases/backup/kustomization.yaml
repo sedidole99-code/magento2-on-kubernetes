@@ -5,3 +5,4 @@ resources:
 - pvc/backup.yaml
 - cronjob/db-backup.yaml
 - cronjob/media-backup.yaml
+- networkpolicy.yaml

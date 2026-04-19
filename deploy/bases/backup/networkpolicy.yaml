@@ -1,0 +1,64 @@
+# NetworkPolicies for backup CronJobs
+# DB backup needs egress to database; media backup only needs PVC access (no network)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-backup
+spec:
+  # Applies to db-backup CronJob pods
+  podSelector:
+    matchLabels:
+      app: backup
+      component: db
+  policyTypes:
+  - Egress
+  egress:
+  # Allow mysqldump to reach the database
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-media-backup
+spec:
+  # Applies to media-backup CronJob pods
+  podSelector:
+    matchLabels:
+      app: backup
+      component: media
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS resolution (media backup only accesses PVC volumes, no network services)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

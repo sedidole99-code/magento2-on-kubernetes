@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
 - magento-consumer.yaml
 - pdb/magento-consumer.yaml
+- networkpolicy.yaml
