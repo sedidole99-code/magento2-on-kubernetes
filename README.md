@@ -36,7 +36,7 @@ Each deploy step builds on the previous one. Pick the level you need:
 make step-1-deploy dev   # Magento + DB + Elasticsearch
 make step-2-deploy dev   # + Redis (cache/sessions) + autoscaling
 make step-3-deploy dev   # + Varnish (full-page cache)
-make step-4-deploy dev   # + automated backups (recommended)
+make step-4-deploy dev   # + RabbitMQ + consumer workers + automated backups (recommended)
 ```
 
 All deploy targets build the Docker image, apply manifests, follow the install job logs, and wait for the deployment to be ready.
@@ -64,7 +64,7 @@ minikube tunnel
 | `make step-1-deploy` | Magento + DB + Elasticsearch | Base setup |
 | `make step-2-deploy` | + Redis + HPA | Cache, sessions, autoscaling |
 | `make step-3-deploy` | + Varnish | Full-page cache |
-| `make step-4-deploy` | + RabbitMQ + Backup CronJobs | Message queues, automated backups |
+| `make step-4-deploy` | + RabbitMQ + Consumer workers + Backup CronJobs | Message queues, dedicated queue consumers, automated backups |
 
 Apply-only targets (no build): `make step-1`, `make step-2`, `make step-3`, `make step-4`
 
@@ -83,11 +83,11 @@ make destroy prod               # tear down production
 make backup-db prod             # backup production database
 ```
 
-| Shortcut | Environment | Namespace | Hostname | Web Replicas |
-|----------|-------------|-----------|----------|-------------|
-| `dev` / `default` | default | `default` | `magento.test` | 2 |
-| `stage` / `staging` | staging | `staging` | `staging.magento.test` | 1 |
-| `prod` / `production` | production | `production` | `magento.example.com` | 3 |
+| Shortcut | Environment | Namespace | Hostname | Web Replicas | Consumer Replicas |
+|----------|-------------|-----------|----------|--------------|-------------------|
+| `dev` / `default` | default | `default` | `magento.test` | 1 | 1 |
+| `stage` / `staging` | staging | `staging` | `staging.magento.test` | 1 | 1 |
+| `prod` / `production` | production | `production` | `magento.example.com` | 3 | 2 |
 
 Running without an environment will fail with an error. Customize overlays in `deploy/overlays/staging/` and `deploy/overlays/production/`.
 
@@ -279,19 +279,14 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **NetworkPolicies** | None | Default-deny + per-component allow policies; cross-namespace isolation (requires Calico/Cilium CNI) |
 | **Resource limits** | Partial | All services have explicit requests and limits (a few CPU limits missing — see TODO) |
 | **RabbitMQ** | None | Full AMQP integration with `env.docker.php` |
+| **Consumer workers** | Cron-based (`consumers_runner`) | Dedicated `magento-consumer` Deployment running `queue:consumers:start` with `--max-messages` restart cycle (cron-based consumer running disabled via `CRON_CONSUMERS_RUNNER=false`) |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
 | **Makefile** | 4 targets | 30+ targets with env support, install log streaming |
 | **README** | Minimal | Full docs, troubleshooting, production guide |
 
 ## TODO
 
-### Critical (security & stability)
-
-- [x] **NetworkPolicies** — each base in `deploy/bases/<component>/networkpolicy.yaml` ships a default-deny-all plus explicit `allow-*` policies: only `magento-web|cron|install|consumer|db-backup` can reach DB:3306; only magento workloads reach Redis/RabbitMQ/Elasticsearch; only `ingress-nginx` reaches Varnish/magento-web; DNS egress explicitly allowed to `kube-system/kube-dns`. Policies use bare `podSelector` (no `namespaceSelector`), so each env is network-isolated — a staging pod cannot reach production's DB. Requires a CNI that enforces NetworkPolicies (Calico, Cilium) — `make minikube` passes `--cni=calico`.
-
 ### High priority (production functionality)
-
-- [x] **Magento consumer workers** — dedicated `magento-consumer` Deployment running `queue:consumers:start` for all registered consumers with `--max-messages` restart cycle. Deployed in step-4 alongside RabbitMQ. Cron-based consumer running is automatically disabled (`CRON_CONSUMERS_RUNNER=false`). Configurable via `CONSUMERS_MAX_MESSAGES` env var (default: 1000). Production overlay: 2 replicas; staging: 1 replica. `deploy.sh` handles consumer scale-down/up during maintenance-mode deploys.
 
 - [ ] **Sealed Secrets / External Secrets** — replace the mittwald secret-generator (which stores plain-text secrets in etcd) with encrypted secret management. [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) encrypts secrets in git using asymmetric crypto (safe to commit), or [External Secrets Operator](https://external-secrets.io/) syncs from AWS Secrets Manager / Vault / GCP Secret Manager. Essential for any production deployment. Also needed for the encryption key (see above).
 

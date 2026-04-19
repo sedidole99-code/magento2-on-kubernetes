@@ -48,7 +48,7 @@ Every target requires an environment suffix: `dev`/`default`, `stage`/`staging`,
 make step-1-deploy dev           # Magento + DB + Elasticsearch
 make step-2-deploy dev           # + Redis + HPA autoscaling
 make step-3-deploy dev           # + Varnish HTTP cache
-make step-4-deploy dev           # + RabbitMQ + backup CronJobs
+make step-4-deploy dev           # + RabbitMQ + consumer workers + backup CronJobs
 ```
 
 Apply-only (no build): `make step-1 dev`, `make step-2 dev`, etc.
