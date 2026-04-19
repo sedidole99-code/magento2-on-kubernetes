@@ -145,8 +145,11 @@ spec:
       port: 443
   egress:
   # ingress-nginx -> varnish:8080 (step-3+ proxies through varnish)
+  # namespaceSelector: {} because the controller is cluster-wide (runs in `default`)
+  # and must reach varnish in every env namespace (default/staging/production).
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: varnish
     ports:
@@ -154,7 +157,8 @@ spec:
       port: 8080
   # ingress-nginx -> magento-web:8080 (direct access in step-1/2, no varnish)
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: magento
           component: web
