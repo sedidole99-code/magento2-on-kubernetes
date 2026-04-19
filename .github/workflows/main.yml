@@ -4,7 +4,7 @@ jobs:
   test:
     strategy:
       matrix:
-        k8s-version: [v1.27.3, v1.28.0, v1.29.0]
+        k8s-version: [v1.33.0, v1.34.0, v1.35.4]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

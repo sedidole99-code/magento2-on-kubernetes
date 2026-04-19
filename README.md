@@ -318,8 +318,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **Resource quotas per namespace** — add `ResourceQuota` and `LimitRange` objects to staging/production namespaces to prevent runaway pods from consuming cluster resources. Enforce maximum CPU/memory per namespace and set default requests/limits for pods that don't specify them.
 
-- [ ] **Upgrade Kubernetes version** — Makefile hardcodes `v1.24.0` which is EOL and unsupported by newer minikube versions (requires `--force`). Update to a supported version (v1.28+) and test all manifests for API compatibility. The `autoscaling/v1` HPA and `policy/v1` PDB APIs are stable, but some deprecated fields may need updating. Also migrate HPA from `autoscaling/v1` to `autoscaling/v2` for memory and custom metrics support.
-
 - [ ] **Slim Docker image** — the production image includes `nano`, `rsync`, and `unzip` which aren't needed at runtime. Removing them reduces attack surface and image size. Consider also adding a `.dockerignore` to exclude test files and docs from the build context.
 
 - [ ] **Missing CPU limits** — RabbitMQ and services dashboard containers (web, api) define CPU requests but no CPU limits. Add explicit CPU limits for consistency and to prevent unbounded CPU usage under load.

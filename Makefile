@@ -79,7 +79,7 @@ check-composer-auth:
 
 minikube: check-tools
 	$(MINIKUBE) start \
-	--kubernetes-version=v1.24.0 \
+	--kubernetes-version=v1.35.4 \
 	--vm-driver=docker \
 	--cpus=4 \
 	--memory=16g \
@@ -88,7 +88,7 @@ minikube: check-tools
 	--extra-config=kubelet.authentication-token-webhook=true \
 	--extra-config=kubelet.authorization-mode=Webhook \
 	--extra-config=scheduler.bind-address=0.0.0.0 \
-	--extra-config=controller-manager.bind-address=0.0.0.0 --force
+	--extra-config=controller-manager.bind-address=0.0.0.0
 	$(MINIKUBE) ssh -- sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_user_instances=512
 	minikube addons enable ingress
 	minikube addons enable default-storageclass

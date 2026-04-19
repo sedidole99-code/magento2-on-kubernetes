@@ -34,7 +34,7 @@ export COMPOSER_AUTH='{"http-basic":{"repo.magento.com":{"username":"...","passw
 ### Build & Deploy
 
 ```bash
-make minikube                    # Start local cluster (K8s v1.24.0, 4 CPU, 16GB)
+make minikube                    # Start local cluster (K8s v1.35.4, 4 CPU, 16GB)
 make cluster-dependencies        # Install Helm charts (cert-manager, nginx-ingress, secret-generator)
 make build                       # Build Docker image (tag: git SHA, appends -dirty if uncommitted)
 make step-4-deploy dev           # Build + deploy full stack (recommended)
