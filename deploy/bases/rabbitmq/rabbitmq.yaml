@@ -69,11 +69,11 @@ spec:
           failureThreshold: 5
         resources:
           requests:
-            cpu: 256m
+            cpu: 300m
             memory: 512Mi
           limits:
             cpu: 1000m
-            memory: 1024Mi
+            memory: 1Gi
         volumeMounts:
         - name: data
           mountPath: /var/lib/rabbitmq
