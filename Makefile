@@ -119,7 +119,7 @@ cluster-dependencies: check-tools
   --set controller.ingressClass.create=true \
   --set controller.ingressClass.name=nginx \
   --set controller.ingressClass.setAsDefaultIngress=true
-	$(HELM) upgrade --install secret-gsenerator mittwald/kubernetes-secret-generator
+	$(HELM) upgrade --install secret-generator mittwald/kubernetes-secret-generator
 
 check-env:
 ifeq ($(ENV),)
@@ -403,7 +403,7 @@ destroy-services:
 destroy-cluster:
 	$(HELM) uninstall cert-manager 2>/dev/null || true
 	$(HELM) uninstall ingress-nginx 2>/dev/null || true
-	$(HELM) uninstall secret-gsenerator 2>/dev/null || true
+	$(HELM) uninstall secret-generator 2>/dev/null || true
 
 destroy-all: destroy-everything
 
@@ -435,7 +435,7 @@ destroy-everything:
 	@echo "--- cluster ---"
 	@$(HELM) uninstall cert-manager 2>/dev/null || true
 	@$(HELM) uninstall ingress-nginx 2>/dev/null || true
-	@$(HELM) uninstall secret-gsenerator 2>/dev/null || true
+	@$(HELM) uninstall secret-generator 2>/dev/null || true
 	@echo "--- namespaces ---"
 	@$(KUBECTL) delete namespace staging production --ignore-not-found --wait=false 2>/dev/null || true
 	@echo "All environments and resources destroyed."
