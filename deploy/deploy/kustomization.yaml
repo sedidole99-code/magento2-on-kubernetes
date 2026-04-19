@@ -6,5 +6,5 @@ metadata:
 resources:
 - ../walkthrough/step-3
 
-patchesStrategicMerge:
-- patches/remove-install-job.yaml
+patches:
+- path: patches/remove-install-job.yaml

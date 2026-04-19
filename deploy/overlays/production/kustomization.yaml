@@ -8,15 +8,15 @@ namespace: production
 resources:
 - ../../walkthrough/step-4
 
-patchesStrategicMerge:
-- patches/magento-web.yaml
-- patches/magento-consumer.yaml
-- patches/hpa.yaml
-- patches/ingress.yaml
-- patches/database.yaml
 
 configMapGenerator:
 - behavior: merge
   envs:
   - config/common.env
   name: config
+patches:
+- path: patches/magento-web.yaml
+- path: patches/magento-consumer.yaml
+- path: patches/hpa.yaml
+- path: patches/ingress.yaml
+- path: patches/database.yaml

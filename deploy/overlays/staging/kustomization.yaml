@@ -8,13 +8,13 @@ namespace: staging
 resources:
 - ../../walkthrough/step-4
 
-patchesStrategicMerge:
-- patches/magento-web.yaml
-- patches/magento-consumer.yaml
-- patches/ingress.yaml
 
 configMapGenerator:
-- name: config
-  behavior: merge
+- behavior: merge
   envs:
   - config/common.env
+  name: config
+patches:
+- path: patches/magento-web.yaml
+- path: patches/magento-consumer.yaml
+- path: patches/ingress.yaml

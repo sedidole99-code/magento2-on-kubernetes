@@ -9,11 +9,11 @@ resources:
 - ../../bases/rabbitmq
 - ../../bases/consumer
 
-patchesStrategicMerge:
-- patches/rabbitmq.yaml
 
 configMapGenerator:
 - behavior: merge
   envs:
   - config/additional.env
   name: additional
+patches:
+- path: patches/rabbitmq.yaml

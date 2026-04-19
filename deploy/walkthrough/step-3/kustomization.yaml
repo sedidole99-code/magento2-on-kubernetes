@@ -4,19 +4,19 @@ metadata:
   name: step-3
 
 resources:
-  - ../step-2
-  - ../../bases/varnish
+- ../step-2
+- ../../bases/varnish
 
-patchesJson6902:
+
+configMapGenerator:
+- behavior: merge
+  envs:
+  - config/additional.env
+  name: additional
+patches:
 - path: patches/ingress.json
   target:
     group: networking.k8s.io
-    version: v1
     kind: Ingress
     name: main
-
-configMapGenerator:
-- name: additional
-  behavior: merge
-  envs:
-  - config/additional.env
+    version: v1

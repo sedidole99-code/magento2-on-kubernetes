@@ -3,18 +3,17 @@ kind: Kustomization
 metadata:
   name: step-2
 
-bases:
-  - ../step-1
-  - ../../bases/redis
 
 resources:
-  - hpa/magento-web.yaml
+- hpa/magento-web.yaml
+- ../step-1
+- ../../bases/redis
 
-patchesStrategicMerge:
-  - patches/wait-for-redis.yaml
 
 configMapGenerator:
-- name: additional
-  behavior: merge
+- behavior: merge
   envs:
   - config/additional.env
+  name: additional
+patches:
+- path: patches/wait-for-redis.yaml
