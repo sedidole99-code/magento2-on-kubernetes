@@ -85,7 +85,7 @@ spec:
           subPath: data
         resources:
           requests:
-            memory: 1Gi
+            memory: 768Mi
             cpu: 250m
           limits:
             memory: 2Gi

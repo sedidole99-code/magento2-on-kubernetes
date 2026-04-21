@@ -52,4 +52,4 @@ spec:
             memory: 4Gi
           requests:
             cpu: 50m
-            memory: 1Gi
+            memory: 256Mi
