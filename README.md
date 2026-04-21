@@ -316,7 +316,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **Graceful shutdown / preStop hooks** — add `preStop` lifecycle hooks to drain connections before pod termination. Magento web pods should finish in-flight PHP requests (`sleep 5` or SIGTERM handling), Varnish should drain its connection pool, and RabbitMQ should stop accepting new messages. Prevents 502 errors during rolling updates.
 
-- [ ] **Resource quotas per namespace** — add `ResourceQuota` and `LimitRange` objects to staging/production namespaces to prevent runaway pods from consuming cluster resources. Enforce maximum CPU/memory per namespace and set default requests/limits for pods that don't specify them.
+- [x] **Resource quotas per namespace** — `ResourceQuota` + two `LimitRange`s from `deploy/bases/quota/`, wired into staging/production overlays. See CLAUDE.md → Architecture → Resource governance.
 
 ## Contributing
 

@@ -106,8 +106,9 @@ Tests live in `test/e2e/` using Cypress + Cucumber. The single test scenario run
 
 ```
 deploy/
-├── bases/           # 9 independent components (app, database, elasticsearch, redis,
-│                    #   rabbitmq, varnish, backup, consumer, monitoring, services)
+├── bases/           # 10 independent components (app, database, elasticsearch, redis,
+│                    #   rabbitmq, varnish, backup, consumer, monitoring, services,
+│                    #   quota — wired only into staging/production overlays)
 ├── walkthrough/     # Progressive steps: step-1 → step-2 → step-3 → step-4
 │                    #   Each step references the previous + adds a base
 ├── overlays/        # Environment configs (production, staging, test, kind)
@@ -160,6 +161,20 @@ Each base in `deploy/bases/<component>/networkpolicy.yaml` ships with its own Ne
 **Requires a CNI that enforces NetworkPolicies** (Calico, Cilium). Minikube's default bridge CNI silently ignores them — `make minikube` passes `--cni=calico`.
 
 When adding a new pod or service: give it a distinct label, create an allow-policy for its ingress, and add explicit egress rules for every backend it talks to (plus kube-dns). A pod with no matching allow-policy is fully isolated by `default-deny-all`.
+
+### Resource governance
+
+The `staging` and `production` namespaces each get a `ResourceQuota` + two `LimitRange`s from `deploy/bases/quota/`. `kind`/`test`/`dev` are intentionally exempt — unconstrained CI and local dev.
+
+- **`ResourceQuota` (`namespace-quota`)** caps `requests.cpu/memory`, `limits.cpu/memory`, object counts (pods, services, configmaps, secrets, PVCs), and `requests.storage`. Base has placeholder values; overlays patch `spec.hard` per env (`deploy/overlays/{staging,production}/patches/resourcequota.yaml`).
+- **`LimitRange` container-defaults** sets `defaultRequest`/`default` only — no `min`/`max`. Acts as a safety net for any container that's added without an explicit `resources:` block. Explicit values always win.
+- **`LimitRange` pvc-bounds** caps PVC storage to 1–20Gi.
+
+**Every pod spec must carry explicit `resources:`** — enforced by policy, not convention. Once a quota is active, a pod with missing requests is rejected at admission. The install Job and every init container across the repo carry explicit values for this reason; LimitRange defaults are only a fallback.
+
+**Quota sizing** is currently conservative, sized for a single-env minikube profile. Running a real staging/production cluster requires bumping the `hard:` values in the overlay patches — the base manifest is intentionally a placeholder.
+
+**Adding a new workload**: either set `resources:` explicitly on every container (preferred) or rely on the LimitRange defaults. Never commit a pod without any resource hint — it'll work in dev and break the first time it's deployed to staging.
 
 ### Secrets
 

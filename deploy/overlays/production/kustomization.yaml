@@ -7,6 +7,7 @@ namespace: production
 
 resources:
 - ../../walkthrough/step-4
+- ../../bases/quota
 
 
 configMapGenerator:
@@ -20,3 +21,4 @@ patches:
 - path: patches/hpa.yaml
 - path: patches/ingress.yaml
 - path: patches/database.yaml
+- path: patches/resourcequota.yaml

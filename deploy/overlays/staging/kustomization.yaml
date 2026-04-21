@@ -7,6 +7,7 @@ namespace: staging
 
 resources:
 - ../../walkthrough/step-4
+- ../../bases/quota
 
 
 configMapGenerator:
@@ -18,3 +19,4 @@ patches:
 - path: patches/magento-web.yaml
 - path: patches/magento-consumer.yaml
 - path: patches/ingress.yaml
+- path: patches/resourcequota.yaml
