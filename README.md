@@ -316,7 +316,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **Graceful shutdown / preStop hooks** — add `preStop` lifecycle hooks to drain connections before pod termination. Magento web pods should finish in-flight PHP requests (`sleep 5` or SIGTERM handling), Varnish should drain its connection pool, and RabbitMQ should stop accepting new messages. Prevents 502 errors during rolling updates.
 
-- [ ] **Resource quotas per namespace** — add `ResourceQuota` and `LimitRange` objects to staging/production namespaces to prevent runaway pods from consuming cluster resources. Enforce maximum CPU/memory per namespace and set default requests/limits for pods that don't specify them.
+- [~] **Resource quotas per namespace** — ready on branch [`resource-governance`](../../tree/resource-governance), pending verification before merge. Adds `ResourceQuota` + two `LimitRange`s (container `defaultRequest`/`default` + PVC 1–20Gi bounds) from `deploy/bases/quota/`, wired only into staging and production overlays; dev/kind/test stay unconstrained. Per-env `hard` caps are sized for the local minikube profile (`--cpus=4 --memory=16g`): staging requests cap 4 CPU / 12Gi (limits 10 CPU / 20Gi), production requests cap 6 CPU / 18Gi (limits 14 CPU / 28Gi), with object caps for pods/services/configmaps/secrets/PVCs + 30Gi storage. Running on a real staging/production cluster requires bumping these `hard` values. The branch also commits explicit `resources:` on every init container and the install Job so the quota can be enforced without breaking admission.
 
 ## Contributing
 
