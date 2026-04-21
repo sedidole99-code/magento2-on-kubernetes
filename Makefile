@@ -400,24 +400,34 @@ endif
 # --------------------------------------------------------------------------- #
 
 destroy: check-env ensure-namespace
+	@echo "Deleting workloads (deployments, statefulsets, jobs, cronjobs)..."
+	@$(KUBECTL) delete deployment,statefulset,daemonset,cronjob,job $(NS_FLAG) \
+		-l '!app.kubernetes.io/managed-by' \
+		--wait --timeout=120s --ignore-not-found 2>/dev/null || true
+	@echo "Force-killing any lingering app pods..."
+	@$(KUBECTL) delete pods $(NS_FLAG) \
+		-l '!app.kubernetes.io/managed-by' \
+		--force --grace-period=0 --ignore-not-found 2>/dev/null || true
+	@echo "Deleting PVCs..."
+	@$(KUBECTL) delete pvc $(NS_FLAG) --all --wait --timeout=120s --ignore-not-found 2>/dev/null || true
+	@stuck=$$($(KUBECTL) get pvc $(NS_FLAG) --no-headers 2>/dev/null | awk '{print $$1}'); \
+	if [ -n "$$stuck" ]; then \
+		echo "PVCs still stuck after timeout; patching finalizers..."; \
+		for pvc in $$stuck; do \
+			$(KUBECTL) patch pvc $(NS_FLAG) $$pvc -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true; \
+		done; \
+	fi
+	@echo "Sweeping remaining app resources (services, configmaps, secrets, ingresses)..."
 ifneq ($(ENV_KUSTOMIZE_PATH),)
-	@$(KUSTOMIZE) build $(ENV_KUSTOMIZE_PATH) 2>/dev/null | $(KUBECTL) delete $(NS_FLAG) -f - --ignore-not-found --wait --timeout=180s 2>/dev/null || true
+	@$(KUSTOMIZE) build $(ENV_KUSTOMIZE_PATH) 2>/dev/null | $(KUBECTL) delete $(NS_FLAG) -f - --ignore-not-found --wait=false 2>/dev/null || true
 else
 	@for path in deploy/walkthrough/step-4 deploy/walkthrough/step-3 deploy/walkthrough/step-2 deploy/walkthrough/step-1; do \
 		manifests=$$($(KUSTOMIZE) build $$path 2>/dev/null) && \
 		[ -n "$$manifests" ] && \
-		echo "$$manifests" | $(KUBECTL) delete -f - --ignore-not-found --wait --timeout=180s 2>/dev/null && \
+		echo "$$manifests" | $(KUBECTL) delete -f - --ignore-not-found --wait=false 2>/dev/null && \
 		break; \
 	done || true
 endif
-	@echo "Force-killing any lingering pods..."
-	@$(KUBECTL) delete pods $(NS_FLAG) --all --force --grace-period=0 --ignore-not-found 2>/dev/null || true
-	@echo "Waiting for PVCs to release..."
-	@$(KUBECTL) delete pvc $(NS_FLAG) --all --wait --timeout=180s 2>/dev/null || true
-	@remaining=$$($(KUBECTL) get pvc $(NS_FLAG) --no-headers 2>/dev/null | wc -l); \
-	if [ "$$remaining" -gt 0 ]; then \
-		echo "Warning: $$remaining PVC(s) still Terminating. Investigate with: kubectl get pvc $(NS_FLAG)"; \
-	fi
 
 destroy-monitoring:
 	$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
@@ -443,16 +453,29 @@ destroy-everything:
 	@for ns in default staging production; do \
 		echo "--- $$ns ---"; \
 		nf=""; [ "$$ns" != "default" ] && nf="-n $$ns"; \
+		echo "Deleting workloads in $$ns..."; \
+		$(KUBECTL) delete deployment,statefulset,daemonset,cronjob,job $$nf \
+			-l '!app.kubernetes.io/managed-by' \
+			--wait --timeout=120s --ignore-not-found 2>/dev/null || true; \
+		echo "Force-killing any lingering app pods in $$ns..."; \
+		$(KUBECTL) delete pods $$nf -l '!app.kubernetes.io/managed-by' \
+			--force --grace-period=0 --ignore-not-found 2>/dev/null || true; \
+		echo "Deleting PVCs in $$ns..."; \
+		$(KUBECTL) delete pvc $$nf --all --wait --timeout=120s --ignore-not-found 2>/dev/null || true; \
+		stuck=$$($(KUBECTL) get pvc $$nf --no-headers 2>/dev/null | awk '{print $$1}'); \
+		if [ -n "$$stuck" ]; then \
+			echo "PVCs still stuck in $$ns; patching finalizers..."; \
+			for pvc in $$stuck; do \
+				$(KUBECTL) patch pvc $$nf $$pvc -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true; \
+			done; \
+		fi; \
+		echo "Sweeping remaining app resources in $$ns..."; \
 		for path in deploy/overlays/$$ns deploy/walkthrough/step-4 deploy/walkthrough/step-3 deploy/walkthrough/step-1; do \
 			manifests=$$($(KUSTOMIZE) build $(CURDIR)/$$path 2>/dev/null) && \
 			[ -n "$$manifests" ] && \
-			echo "$$manifests" | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait --timeout=180s 2>/dev/null && \
+			echo "$$manifests" | $(KUBECTL) delete $$nf -f - --ignore-not-found --wait=false 2>/dev/null && \
 			break; \
 		done || true; \
-		echo "Force-killing any lingering pods in $$ns..."; \
-		$(KUBECTL) delete pods $$nf --all --force --grace-period=0 --ignore-not-found 2>/dev/null || true; \
-		echo "Waiting for PVCs to release in $$ns..."; \
-		$(KUBECTL) delete pvc $$nf --all --wait --timeout=180s 2>/dev/null || true; \
 	done
 	@echo "--- monitoring ---"
 	@$(HELM) uninstall kibana --no-hooks 2>/dev/null || true
