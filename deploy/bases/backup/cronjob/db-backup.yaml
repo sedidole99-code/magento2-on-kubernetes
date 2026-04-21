@@ -22,6 +22,13 @@ spec:
               echo "Waiting for database..."
               while ! nc -z db 3306; do sleep 2; done
               echo "Database is ready"
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                cpu: 200m
+                memory: 128Mi
           containers:
           - name: db-backup
             image: percona:8.0@sha256:5a09f82af8005b1df25cffa7a24472b2eaa57c4dbb355c050e24b2dd062e1005

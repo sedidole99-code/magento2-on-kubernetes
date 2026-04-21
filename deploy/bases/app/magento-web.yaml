@@ -76,6 +76,13 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
       - name: wait-for-elasticsearch
         image: curlimages/curl:8.14.1@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b
         command: ["/bin/sh"]
@@ -92,6 +99,13 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
       - name: setup
         image: mymagento/magento2:latest
         command:
@@ -131,6 +145,13 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
       containers:
       - image: mymagento/magento2:latest
         imagePullPolicy: IfNotPresent

@@ -27,6 +27,13 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
 
 
 ---
@@ -56,3 +63,10 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi

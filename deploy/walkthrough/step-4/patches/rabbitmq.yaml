@@ -32,6 +32,13 @@ spec:
           echo "Waiting for RabbitMQ..."
           while ! nc -z rabbitmq 5672; do sleep 2; done
           echo "RabbitMQ is ready"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
 
 ---
 
@@ -65,6 +72,13 @@ spec:
           echo "Waiting for RabbitMQ..."
           while ! nc -z rabbitmq 5672; do sleep 2; done
           echo "RabbitMQ is ready"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
 
 ---
 
@@ -127,3 +141,10 @@ spec:
           echo "Waiting for RabbitMQ..."
           while ! nc -z rabbitmq 5672; do sleep 2; done
           echo "RabbitMQ is ready"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi

@@ -23,6 +23,13 @@ spec:
         - mountPath: /var/www/html/pub/media
           name: media
           subPath: media
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
       - name: wait-for-db
         image: mymagento/magento2:latest
         command:
@@ -44,6 +51,13 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
       - name: wait-for-elasticsearch
         image: curlimages/curl:8.14.1@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b
         command: ["/bin/sh"]
@@ -60,6 +74,13 @@ spec:
             name: config
         - configMapRef:
             name: additional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
       containers:
       - name: magento-setup
         image: mymagento/magento2:latest
@@ -108,6 +129,13 @@ spec:
           name: media
           subPath: media
         imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: "4"
+            memory: 6Gi
       volumes:
       - name: media
         persistentVolumeClaim:
