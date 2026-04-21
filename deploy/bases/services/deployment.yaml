@@ -6,6 +6,7 @@ metadata:
     app: services-dashboard
 spec:
   replicas: 1
+  progressDeadlineSeconds: 180
   selector:
     matchLabels:
       app: services-dashboard

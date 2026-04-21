@@ -32,6 +32,7 @@ spec:
     matchLabels:
       app: varnish
   replicas: 1
+  progressDeadlineSeconds: 180
   template:
     metadata:
       labels:

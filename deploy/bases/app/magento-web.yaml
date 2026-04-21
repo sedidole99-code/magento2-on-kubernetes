@@ -38,6 +38,7 @@ metadata:
     component: web
 spec:
   replicas: 1
+  progressDeadlineSeconds: 600
   selector:
     matchLabels:
       app: magento
