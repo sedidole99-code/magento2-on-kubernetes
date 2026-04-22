@@ -226,7 +226,9 @@ Alerts defined in `deploy/bases/monitoring/prometheusrule.yaml`:
 
 ## SSL/TLS
 
-cert-manager handles certificates automatically. Local dev uses a self-signed `ClusterIssuer`. For production, create a Let's Encrypt `ClusterIssuer`:
+cert-manager handles certificates automatically. Local dev uses a self-signed `ClusterIssuer`, which Chrome flags as untrusted — see [TRUSTING_LOCAL_TLS.md](TRUSTING_LOCAL_TLS.md) for three ways to fix it (quick per-cert import, `mkcert`-backed CA, or a manual OpenSSL CA).
+
+For production, create a Let's Encrypt `ClusterIssuer`:
 
 ```yaml
 apiVersion: cert-manager.io/v1
