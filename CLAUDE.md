@@ -106,8 +106,10 @@ Tests live in `test/e2e/` using Cypress + Cucumber. The single test scenario run
 
 ```
 deploy/
-├── bases/           # 9 independent components (app, database, elasticsearch, redis,
+├── bases/           # 10 independent components (app, database, elasticsearch, redis,
 │                    #   rabbitmq, varnish, backup, consumer, monitoring, services)
+├── components/      # Kustomize Components (mix-ins). resource-limits-added toggles
+│                    #   the cpu-limit additions on db/rabbitmq/varnish.
 ├── walkthrough/     # Progressive steps: step-1 → step-2 → step-3 → step-4
 │                    #   Each step references the previous + adds a base
 ├── overlays/        # Environment configs (production, staging, test, kind)
@@ -120,6 +122,8 @@ Steps compose progressively: step-1 (app+db+es) → step-2 (+redis+HPA) → step
 
 The `redis` base ships **three separate StatefulSets** — `redis-cache` (default cache, ephemeral, LRU 512mb), `redis-page-cache` (FPC, ephemeral, LRU 1024mb), `redis-sessions` (sessions, `VolumeClaimTemplate` 1Gi + AOF persistence, `noeviction`). All three carry label `app: redis` with an additional `role: cache|page-cache|sessions` label. Magento reads three independent env-var groups (`REDIS_CACHE_*`, `REDIS_FPC_*`, `REDIS_SESSION_*`) via `src/app/etc/env.docker.php` — each points at its own Service. `bin/magento cache:flush` only touches `redis-cache`; FPC survives.
 
+`deploy/components/` holds Kustomize Components — mix-ins attached via a `components:` entry in a parent kustomization. `resource-limits-added` (wired into `deploy/walkthrough/step-4/kustomization.yaml`) re-applies the cpu limit on `db` + `rabbitmq` and the full `limits:` block on `varnish`. Those three fields are **not inline** in the base manifests; they exist only when the Component's `patches:` block is active. Commenting it out reverts those three containers to the pre-initiative ("Partial") state on step-4 and every overlay that inherits step-4 (`staging`, `production`); step-1/2/3 standalone builds and the `kind`/`test` overlays never include the Component, so they always render without those added limits.
+
 ### Container Architecture
 
 The `magento-web` pod runs 3 containers + 3 init containers:
@@ -131,6 +135,30 @@ The `magento-consumer` pod (step-4+, **opt-in**) runs 1 container + 2 init conta
 - **Main:** `magento-consumer` (starts all queue consumers via `queue:consumers:start` with `--max-messages` restart cycle)
 
 When the dedicated pod is disabled (the default), `magento-cron` spawns consumers every cron tick, each running until `CRON_CONSUMERS_MAX_MESSAGES` messages or an empty queue (via `CONSUMERS_WAIT_FOR_MESSAGES=0`). `CRON_CONSUMERS_LIST` is empty in step-4 — Magento treats an empty list as *run every declared consumer*, so whatever `queue_consumer.xml` declarations the image ships (core + custom modules) are what runs. Curate per-env by overriding `CRON_CONSUMERS_LIST` (comma-separated) in an overlay's `additional.env` via `configMapGenerator` merge.
+
+### Autoscaling (HPA)
+
+Step-2 adds `deploy/walkthrough/step-2/hpa/magento-web.yaml` — a CPU-utilization HPA on `magento-web` with `averageUtilization: 75`, base range `1–5` replicas. The `production` overlay patches it to `3–10`; staging inherits the step-2 defaults. Because the HPA computes utilization as a percentage of `requests.cpu`, any edit that strips `requests.cpu` from the `magento-web` container breaks autoscaling — `kubectl get hpa` reports `<unknown>/75%` and no scale events fire. No other workload is autoscaled.
+
+### PodDisruptionBudgets
+
+Every workload base ships a PDB alongside its Deployment/StatefulSet: `magento-web`, `magento-consumer`, `db`, `elasticsearch`, `rabbitmq`, `varnish`, plus three per-role PDBs for `redis-cache` / `redis-page-cache` / `redis-sessions`. They block voluntary disruptions (node drains, cluster upgrades) from evicting all replicas at once, and the three Redis PDBs specifically prevent simultaneous eviction of sessions + FPC during node drains. Adding a new workload requires a PDB entry — otherwise a drain can evict its only replica.
+
+### Backup System
+
+Step-4 adds two CronJobs in `deploy/bases/backup/`: `db-backup` (daily 02:00 UTC, active) and `media-backup` (daily 03:00 UTC, `suspend: true` by default — enable with `kubectl patch cronjob media-backup -p '{"spec":{"suspend":false}}'`). Both keep the last `BACKUP_RETENTION=7` artifacts and write to a shared `backup` PVC (`ReadWriteOnce`). `make backup` / `make backup-db` / `make backup-media` trigger on-demand Jobs from the CronJob spec; `make backup-list` and `make restore-db BACKUP_NAME=…` work against the same PVC. The services dashboard mounts the PVC read-only for its backup-management UI — never run dashboard pods concurrently with active backup Jobs on different nodes (RWO collision).
+
+### Monitoring Stack
+
+Three stacks ship as separate Makefile targets and are **not part of the walkthrough** (each installs into its own namespace or uses Helm releases directly):
+
+- `make monitoring` — kube-prometheus-stack (Prometheus + Grafana). `deploy/bases/monitoring/servicemonitor.yaml` scrapes the PHP-FPM and Nginx exporters in `magento-web`; `prometheusrule.yaml` carries 9 alerts (pod restarts/unavailable, PHP-FPM saturation/slow requests/down, Nginx error rate/down, cron failures). Three Grafana dashboards (Magento Overview / PHP-FPM / Nginx) are auto-provisioned from `deploy/bases/monitoring/dashboards/`.
+- `make monitoring-kibana` — ECK-operator Elasticsearch + Fluent Bit tail of container logs + Kibana for log exploration. Index pattern: `logstash-*`.
+- `make logging-loki` — Loki + Promtail. `make monitoring-loki-datasource` wires Loki into the Grafana from the first stack.
+
+### Services Dashboard
+
+`deploy/bases/services/` is a **standalone kustomization** — not referenced from any walkthrough step. `make services-server` builds it directly and deploys a `services-dashboard` pod with three containers: `nginx` (serves `index.html` + `backups.html` behind basic-auth from `services-dashboard-credentials`), `collector` (kubectl-based sidecar polling cluster state + parsing the backup PVC), and `api` (busybox endpoint for the HTML pages). A ServiceAccount with a read-only ClusterRole over workloads/pods plus a namespaced Role to trigger backup Jobs is shipped alongside. The pod mounts the `backup` PVC read-only; if a backup Job is running on a different node, pod scheduling will fail on the RWO constraint.
 
 ### Configuration Flow
 

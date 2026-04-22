@@ -74,9 +74,6 @@ spec:
           requests:
             cpu: 50m
             memory: 512Mi
-          limits:
-            cpu: 500m
-            memory: 1Gi
         env:
         - name: VARNISH_BACKEND_HOST
           value: web

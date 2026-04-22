@@ -279,7 +279,9 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **NetworkPolicies** | None | Default-deny + per-component allow policies; cross-namespace isolation (requires Calico/Cilium CNI) |
 | **Resource limits** | Partial | All services have explicit requests and limits |
 | **RabbitMQ** | None | Full AMQP integration with `env.docker.php` |
-| **Consumer workers** | Cron-based (`consumers_runner`) | Dedicated `magento-consumer` Deployment running `queue:consumers:start` with `--max-messages` restart cycle (cron-based consumer running disabled via `CRON_CONSUMERS_RUNNER=false`) |
+| **Consumer workers** | Cron-based (`consumers_runner`) | Cron-driven by default via `cron_consumers_runner` + `CONSUMERS_WAIT_FOR_MESSAGES=0` (empty-queue exit, per-tick `--max-messages` cycle). Dedicated `magento-consumer` Deployment ships commented out in step-4; opt in by uncommenting `../../bases/consumer` + overlay patches and flipping `CRON_CONSUMERS_RUNNER=false`. |
+| **Redis topology** | Single instance (3 DBs) | Three dedicated StatefulSets — `redis-cache` + `redis-page-cache` (ephemeral, LRU) + `redis-sessions` (1Gi PVC, AOF persistence, `noeviction`). `cache:flush` only evicts `redis-cache`; FPC and sessions survive. Per-role PDBs prevent simultaneous eviction during drains. |
+| **Kustomize components** | None | `deploy/components/resource-limits-added/` — single-file toggle that re-applies the cpu-limit additions on `db` + `rabbitmq` + `varnish`. Comment its `patches:` block to revert those three containers to the pre-initiative state without touching base manifests. |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
 | **Makefile** | 4 targets | 30+ targets with env support, install log streaming |
 | **README** | Minimal | Full docs, troubleshooting, production guide |
@@ -305,8 +307,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 - [ ] **Database read replicas** — add Percona XtraDB Cluster or a ProxySQL sidecar for read/write splitting. Heavy catalog browsing (category pages, layered navigation, search) generates read-heavy queries that can saturate a single MySQL instance. Read replicas offload SELECT queries while the primary handles writes.
 
 - [ ] **Deploy rollback on failure** — `deploy.sh` currently relies on `kubectl rollout status` exit code but doesn't automatically roll back. Add `kubectl rollout undo deployment/magento-web` on non-zero exit, and trigger a pre-deploy database backup so failed migrations can be reversed.
-
-- [~] **Redis Full Page Cache separation** — landed on `main`, pending runtime verification via `make step-4-deploy dev/stage/prod`. `deploy/bases/redis/` now ships three separate StatefulSets (`redis-cache`, `redis-page-cache`, `redis-sessions`), each with its own Service and per-role PodDisruptionBudget. A `cache:flush` only evicts `redis-cache` — FPC survives. `redis-sessions` adds a 1Gi `VolumeClaimTemplate` plus `--appendonly yes --appendfsync everysec` + `noeviction` policy so sessions persist across pod restarts. All three keep label `app: redis`, so the existing `allow-redis` NetworkPolicy and all `magento-*` egress rules apply unchanged. Env vars in `deploy/walkthrough/step-2/config/additional.env` point to `redis-cache` / `redis-page-cache` / `redis-sessions` hostnames. Applied in the base for every environment (dev/staging/production share the same topology) to preserve dev/prod parity.
 
 ### Nice to have (advanced operations)
 

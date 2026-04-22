@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+metadata:
+  name: resource-limits-added
+
+# Single-file toggle for the "Resource limits: Partial -> All" additions
+# (commits 8e05220 + c04df8e): cpu limit on percona + rabbitmq, full limits
+# block on varnish. Comment out the whole patches: block below to revert
+# those three containers to their pre-initiative state. All other resources:
+# blocks (magento-web, elasticsearch, redis, consumer, backup, etc.) are
+# unaffected.
+patches:
+- patch: |-
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: db
+    spec:
+      template:
+        spec:
+          containers:
+          - name: db
+            resources:
+              limits:
+                cpu: "1"
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: varnish
+    spec:
+      template:
+        spec:
+          containers:
+          - name: varnish
+            resources:
+              limits:
+                cpu: 500m
+                memory: 1Gi
+- patch: |-
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: rabbitmq
+    spec:
+      template:
+        spec:
+          containers:
+          - name: rabbitmq
+            resources:
+              limits:
+                cpu: 1000m
