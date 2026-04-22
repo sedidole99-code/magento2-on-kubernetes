@@ -1,9 +1,36 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: redis
+  name: redis-cache
 spec:
   minAvailable: 1
   selector:
     matchLabels:
       app: redis
+      role: cache
+
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-page-cache
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis
+      role: page-cache
+
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-sessions
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis
+      role: sessions

@@ -118,6 +118,8 @@ deploy/
 
 Steps compose progressively: step-1 (app+db+es) → step-2 (+redis+HPA) → step-3 (+varnish, ingress rerouted) → step-4 (+rabbitmq+consumer workers+backups). All overlays build on step-4.
 
+The `redis` base ships **three separate StatefulSets** — `redis-cache` (default cache, ephemeral, LRU 512mb), `redis-page-cache` (FPC, ephemeral, LRU 1024mb), `redis-sessions` (sessions, `VolumeClaimTemplate` 1Gi + AOF persistence, `noeviction`). All three carry label `app: redis` with an additional `role: cache|page-cache|sessions` label. Magento reads three independent env-var groups (`REDIS_CACHE_*`, `REDIS_FPC_*`, `REDIS_SESSION_*`) via `src/app/etc/env.docker.php` — each points at its own Service. `bin/magento cache:flush` only touches `redis-cache`; FPC survives.
+
 ### Container Architecture
 
 The `magento-web` pod runs 3 containers + 3 init containers:
@@ -151,7 +153,7 @@ In maintenance mode, `deploy.sh` scales down both `magento-web` and `magento-con
 Each base in `deploy/bases/<component>/networkpolicy.yaml` ships with its own NetworkPolicy, wired into the kustomization alongside the Deployment/StatefulSet. The model is default-deny plus explicit allows:
 
 - **`default-deny-all`** (in `deploy/bases/app/networkpolicy.yaml`) — catch-all that denies all ingress and egress for every pod in the namespace unless another policy allows it.
-- **Per-backend allow policies** — `allow-db`, `allow-redis`, `allow-rabbitmq`, `allow-elasticsearch` permit ingress only from magento pods labelled `app=magento,component=(web|cron|install|consumer)` (and `app=backup,component=db` for db-backup).
+- **Per-backend allow policies** — `allow-db`, `allow-redis`, `allow-rabbitmq`, `allow-elasticsearch` permit ingress only from magento pods labelled `app=magento,component=(web|cron|install|consumer)` (and `app=backup,component=db` for db-backup). `allow-redis` covers all three `redis-*` StatefulSets via the shared `app: redis` label; three per-role PodDisruptionBudgets (`redis-cache`, `redis-page-cache`, `redis-sessions`) prevent simultaneous eviction of sessions + FPC during node drains.
 - **Edge & workload policies** — `allow-ingress-nginx` (external 80/443 + egress to varnish/web + kube-apiserver), `allow-varnish`, `allow-magento-web` (egress fans out to every backend), `allow-magento-cron`, `allow-magento-install`, `allow-magento-consumer`, `allow-db-backup`, `allow-media-backup`, `allow-secret-generator` (kube-apiserver egress for StringSecret CRD), and `allow-varnish` plus `allow-monitoring` where applicable.
 - **Namespace isolation** — per-env backend and workload policies (`allow-db`, `allow-redis`, `allow-rabbitmq`, `allow-elasticsearch`, `allow-magento-*`) use `podSelector` without a `namespaceSelector`, so a pod in `staging` cannot reach `db.production.svc.cluster.local:3306` even if it carries allowed labels. Each env's data plane is network-isolated.
 - **Cluster-global edge exception** — the ingress controller is installed cluster-wide (runs in `default`) but must reach varnish/magento-web in every env namespace. So `allow-ingress-nginx`'s egress to varnish/magento-web and `allow-varnish`'s ingress from the controller both use `namespaceSelector: {}` alongside the `app.kubernetes.io/instance: ingress-nginx` selector. Any future cluster-global component (e.g. a webhook that must talk into every env) follows the same pattern: keep tenant-isolating backend rules strict, and carve out explicit cross-namespace exceptions only at the edge.

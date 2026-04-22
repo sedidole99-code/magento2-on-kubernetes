@@ -112,7 +112,7 @@ deploy/
 │   ├── app/                    # Magento web, cron, install job, ingress, PVC, PDB
 │   ├── database/               # Percona StatefulSet, credentials, my.cnf
 │   ├── elasticsearch/          # ES StatefulSet, PDB
-│   ├── redis/                  # Redis StatefulSet, PDB
+│   ├── redis/                  # Three Redis StatefulSets (cache/page-cache/sessions), per-role PDBs
 │   ├── rabbitmq/               # RabbitMQ StatefulSet, credentials, PDB
 │   ├── varnish/                # Varnish Deployment, VCL config, PDB
 │   ├── backup/                 # DB/media backup CronJobs, backup PVC
@@ -158,7 +158,7 @@ The bare minimum to run Magento 2. Includes the web deployment, Percona database
 ### Step 2: Caching & Autoscaling
 **Adds:** Redis + HorizontalPodAutoscaler
 
-Introduces Redis for session storage (DB 2), cache backend (DB 0), and full-page cache (DB 1). Adds HPA scaling magento-web between 2-5 replicas at 75% CPU threshold. Patches add `wait-for-redis` init containers to web deployment and install job.
+Introduces three separate Redis StatefulSets: `redis-cache` (default cache), `redis-page-cache` (full-page cache), `redis-sessions` (session storage with PVC + AOF persistence). Splitting the workloads means a `cache:flush` only evicts `redis-cache` — FPC survives; and session data is preserved across pod restarts. Adds HPA scaling magento-web between 2-5 replicas at 75% CPU threshold. Patches add `wait-for-redis` init containers to web deployment and install job; the init container loops through all three Redis hosts.
 
 ### Step 3: HTTP Cache
 **Adds:** Varnish
@@ -249,17 +249,17 @@ Initially deployed via Elastic Cloud on Kubernetes (ECK) operator, later simplif
 
 ### Redis 8.0 (`deploy/bases/redis/`)
 
-| Aspect | Configuration |
-|--------|--------------|
-| **Kind** | StatefulSet (1 replica) |
-| **Storage** | None (in-memory only, no persistence) |
-| **Resources** | 50m-500m CPU, 1-4Gi RAM |
-| **Health checks** | `redis-cli ping` (readiness: 5s, liveness: 15s) |
+Three independent StatefulSets, each a single replica with its own Service and per-role PodDisruptionBudget. All three carry label `app: redis` (so the existing `allow-redis` NetworkPolicy and all `magento-*` egress rules apply unchanged) plus a `role: cache|page-cache|sessions` label.
 
-**Database allocation:**
-- DB 0: Cache backend
-- DB 1: Full-page cache
-- DB 2: Session storage
+| Instance | Service | Storage | Redis flags | Resources (req / limit) |
+|----------|---------|---------|-------------|-------------------------|
+| `redis-cache` | `redis-cache:6379` | `emptyDir` | `--maxmemory 512mb --maxmemory-policy allkeys-lru` | 50m / 500m CPU, 256Mi / 1Gi RAM |
+| `redis-page-cache` | `redis-page-cache:6379` | `emptyDir` | `--maxmemory 1024mb --maxmemory-policy allkeys-lru` | 50m / 500m CPU, 512Mi / 2Gi RAM |
+| `redis-sessions` | `redis-sessions:6379` | `VolumeClaimTemplate` 1Gi at `/data` | `--appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy noeviction` | 50m / 200m CPU, 128Mi / 512Mi RAM |
+
+All three use health checks via `redis-cli ping` (readiness: 5s, liveness: 15s).
+
+**Why split:** On the single-instance model, `bin/magento cache:flush` (run on every deploy by `deploy.sh`) wiped the default cache AND triggered memory pressure that evicted FPC entries — defeating the point of a full-page cache. Sessions also shared RAM with the caches, so a large cache population could log users out. The split lets a cache flush touch only `redis-cache`, keeps FPC intact, and gives sessions their own instance with disk persistence so restarts don't destroy user sessions. `src/app/etc/env.docker.php` already supported three independent `REDIS_*` env-var groups; the change was purely K8s topology + ConfigMap.
 
 ### Varnish 7.7 (`deploy/bases/varnish/`)
 
@@ -675,7 +675,9 @@ make step-1                    # Deploy minimal stack
 | magento-cron | 50m / 1Gi | 500m / 4Gi | 50m / 1Gi | 500m / 4Gi |
 | database | 100m / 1Gi | 1 / 1Gi | 500m / 2Gi | 1 / 4Gi |
 | elasticsearch | 250m / 1Gi | 500m / 1Gi | 250m / 1Gi | 500m / 1Gi |
-| redis | 50m / 1Gi | 500m / 4Gi | 50m / 1Gi | 500m / 4Gi |
+| redis-cache | 50m / 256Mi | 500m / 1Gi | 50m / 256Mi | 500m / 1Gi |
+| redis-page-cache | 50m / 512Mi | 500m / 2Gi | 50m / 512Mi | 500m / 2Gi |
+| redis-sessions | 50m / 128Mi | 200m / 512Mi | 50m / 128Mi | 200m / 512Mi |
 | varnish | 50m / 512Mi | 500m / 1Gi | 50m / 512Mi | 500m / 1Gi |
 | rabbitmq | 50m / 256Mi | - / 512Mi | 50m / 256Mi | - / 512Mi |
 

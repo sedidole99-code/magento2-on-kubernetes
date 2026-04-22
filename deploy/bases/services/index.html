@@ -276,16 +276,38 @@ function render() {
   ], cmd('kubectl port-forward svc/elasticsearch 9200:9200' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
   isAvailable(svc.elasticsearch));
 
-  // Redis
-  html += card('Redis', [
-    row('Host', mono('redis:6379')),
-    row('Service', mono(svc.redis || 'n/a')),
-    row('DB 0', 'Cache'),
-    row('DB 1', 'Full Page Cache'),
-    row('DB 2', 'Sessions'),
-    row('Image', mono(d.redis?.image)),
-  ], cmd('kubectl port-forward svc/redis 6379:6379' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
-  isAvailable(svc.redis));
+  // Redis — Cache (default backend)
+  html += card('Redis Cache', [
+    row('Host', mono('redis-cache:6379')),
+    row('Service', mono(svc.redis_cache || 'n/a')),
+    row('Role', 'Default cache (Magento config, block_html, etc.)'),
+    row('Persistence', badge('ephemeral', 'yellow')),
+    row('Eviction', mono('allkeys-lru @ 512mb')),
+    row('Image', mono(d.redis_cache?.image)),
+  ], cmd('kubectl port-forward svc/redis-cache 6379:6379' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
+  isAvailable(svc.redis_cache));
+
+  // Redis — Full Page Cache
+  html += card('Redis Page Cache', [
+    row('Host', mono('redis-page-cache:6379')),
+    row('Service', mono(svc.redis_page_cache || 'n/a')),
+    row('Role', 'Full page cache (survives cache:flush)'),
+    row('Persistence', badge('ephemeral', 'yellow')),
+    row('Eviction', mono('allkeys-lru @ 1024mb')),
+    row('Image', mono(d.redis_page_cache?.image)),
+  ], cmd('kubectl port-forward svc/redis-page-cache 6379:6379' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
+  isAvailable(svc.redis_page_cache));
+
+  // Redis — Sessions
+  html += card('Redis Sessions', [
+    row('Host', mono('redis-sessions:6379')),
+    row('Service', mono(svc.redis_sessions || 'n/a')),
+    row('Role', 'Session storage (survives pod restart)'),
+    row('Persistence', badge('AOF + PVC', 'green')),
+    row('Eviction', mono('noeviction @ 256mb')),
+    row('Image', mono(d.redis_sessions?.image)),
+  ], cmd('kubectl port-forward svc/redis-sessions 6379:6379' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
+  isAvailable(svc.redis_sessions));
 
   // Varnish
   html += card('Varnish', [

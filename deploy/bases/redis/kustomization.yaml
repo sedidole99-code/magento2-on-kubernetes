@@ -4,6 +4,8 @@ metadata:
   name: redis
 
 resources:
-  - redis.yaml
+  - redis-cache.yaml
+  - redis-page-cache.yaml
+  - redis-sessions.yaml
   - pdb.yaml
   - networkpolicy.yaml

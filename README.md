@@ -306,7 +306,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **Deploy rollback on failure** — `deploy.sh` currently relies on `kubectl rollout status` exit code but doesn't automatically roll back. Add `kubectl rollout undo deployment/magento-web` on non-zero exit, and trigger a pre-deploy database backup so failed migrations can be reversed.
 
-- [ ] **Redis Full Page Cache separation** — currently Redis uses separate databases (0=cache, 1=FPC, 2=sessions) on a single instance. For production, consider separating FPC into its own Redis instance so a cache flush doesn't affect page cache, and sessions get a dedicated instance with appropriate persistence settings.
+- [~] **Redis Full Page Cache separation** — landed on `main`, pending runtime verification via `make step-4-deploy dev/stage/prod`. `deploy/bases/redis/` now ships three separate StatefulSets (`redis-cache`, `redis-page-cache`, `redis-sessions`), each with its own Service and per-role PodDisruptionBudget. A `cache:flush` only evicts `redis-cache` — FPC survives. `redis-sessions` adds a 1Gi `VolumeClaimTemplate` plus `--appendonly yes --appendfsync everysec` + `noeviction` policy so sessions persist across pod restarts. All three keep label `app: redis`, so the existing `allow-redis` NetworkPolicy and all `magento-*` egress rules apply unchanged. Env vars in `deploy/walkthrough/step-2/config/additional.env` point to `redis-cache` / `redis-page-cache` / `redis-sessions` hostnames. Applied in the base for every environment (dev/staging/production share the same topology) to preserve dev/prod parity.
 
 ### Nice to have (advanced operations)
 

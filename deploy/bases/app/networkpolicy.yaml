@@ -84,7 +84,7 @@ spec:
     ports:
     - protocol: TCP
       port: 9200
-  # magento-web -> redis:6379 (cache and session storage)
+  # magento-web -> redis-cache / redis-page-cache / redis-sessions on 6379 (default cache, FPC, session storage)
   - to:
     - podSelector:
         matchLabels:
@@ -257,7 +257,7 @@ spec:
     ports:
     - protocol: TCP
       port: 9200
-  # magento-cron -> redis:6379 (cache/session access during cron jobs)
+  # magento-cron -> redis-cache / redis-page-cache / redis-sessions on 6379 (cache/session access during cron jobs)
   - to:
     - podSelector:
         matchLabels:
@@ -326,7 +326,7 @@ spec:
     ports:
     - protocol: TCP
       port: 9200
-  # magento-install -> redis:6379 (cache/session config during install + wait-for-redis init)
+  # magento-install -> redis-cache / redis-page-cache / redis-sessions on 6379 (cache/session config during install + wait-for-redis init)
   - to:
     - podSelector:
         matchLabels:

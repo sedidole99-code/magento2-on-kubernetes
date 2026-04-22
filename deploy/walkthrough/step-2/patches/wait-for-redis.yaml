@@ -19,7 +19,15 @@ spec:
           - -c
           - |
             while ! { echo -e '*1\r\n$4\r\nPING\r\n'; sleep 1; } | nc -w1 $(REDIS_CACHE_HOST) $(REDIS_CACHE_PORT)
-            do echo "waiting for $(REDIS_CACHE_HOST)"
+            do echo "waiting for $(REDIS_CACHE_HOST):$(REDIS_CACHE_PORT)"
+            sleep 1
+            done
+            while ! { echo -e '*1\r\n$4\r\nPING\r\n'; sleep 1; } | nc -w1 $(REDIS_FPC_HOST) $(REDIS_FPC_PORT)
+            do echo "waiting for $(REDIS_FPC_HOST):$(REDIS_FPC_PORT)"
+            sleep 1
+            done
+            while ! { echo -e '*1\r\n$4\r\nPING\r\n'; sleep 1; } | nc -w1 $(REDIS_SESSION_HOST) $(REDIS_SESSION_PORT)
+            do echo "waiting for $(REDIS_SESSION_HOST):$(REDIS_SESSION_PORT)"
             sleep 1
             done
         envFrom:
@@ -48,7 +56,15 @@ spec:
           - -c
           - |
             while ! { echo -e '*1\r\n$4\r\nPING\r\n'; sleep 1; } | nc -w1 $(REDIS_CACHE_HOST) $(REDIS_CACHE_PORT)
-            do echo "waiting for $(REDIS_CACHE_HOST)"
+            do echo "waiting for $(REDIS_CACHE_HOST):$(REDIS_CACHE_PORT)"
+            sleep 1
+            done
+            while ! { echo -e '*1\r\n$4\r\nPING\r\n'; sleep 1; } | nc -w1 $(REDIS_FPC_HOST) $(REDIS_FPC_PORT)
+            do echo "waiting for $(REDIS_FPC_HOST):$(REDIS_FPC_PORT)"
+            sleep 1
+            done
+            while ! { echo -e '*1\r\n$4\r\nPING\r\n'; sleep 1; } | nc -w1 $(REDIS_SESSION_HOST) $(REDIS_SESSION_PORT)
+            do echo "waiting for $(REDIS_SESSION_HOST):$(REDIS_SESSION_PORT)"
             sleep 1
             done
         envFrom:
