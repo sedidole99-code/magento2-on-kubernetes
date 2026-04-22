@@ -252,16 +252,27 @@ endef
 # and magento-cron (indexer_reindex_all_invalid) from racing against the install job's
 # fixture generation and index:reset on the catalog_rule_product indexer.
 # Mirrors the maintenance-mode pattern in deploy/deploy.sh.
+#
+# The consumer's intended replica count (may be >1 in overlays) is stashed as a
+# Deployment annotation before scaling to 0, then restored after install — so
+# production's replicas: 2 isn't stomped back down to 1 on every step-4-deploy.
 define wait_for_install_with_pause
 	@echo ""
 	@echo "Pausing magento-cron and magento-consumer for install window..."
 	@$(KUBECTL) patch cronjob $(NS_FLAG) magento-cron -p '{"spec":{"suspend":true}}' 2>/dev/null || true
-	@$(KUBECTL) scale $(NS_FLAG) deployment/magento-consumer --replicas=0 2>/dev/null || true
+	@SAVED=$$($(KUBECTL) get $(NS_FLAG) deployment/magento-consumer -o jsonpath='{.spec.replicas}' 2>/dev/null); \
+		SAVED=$${SAVED:-1}; \
+		echo "    saving magento-consumer replicas=$$SAVED before pause"; \
+		$(KUBECTL) annotate $(NS_FLAG) deployment/magento-consumer magento-consumer-replicas-backup=$$SAVED --overwrite 2>/dev/null || true; \
+		$(KUBECTL) scale $(NS_FLAG) deployment/magento-consumer --replicas=0 2>/dev/null || true
 	$(call wait_for_install)
 	@echo ""
 	@echo "Resuming magento-cron and magento-consumer..."
 	@$(KUBECTL) patch cronjob $(NS_FLAG) magento-cron -p '{"spec":{"suspend":false}}' 2>/dev/null || true
-	@$(KUBECTL) scale $(NS_FLAG) deployment/magento-consumer --replicas=1 2>/dev/null || true
+	@SAVED=$$($(KUBECTL) get $(NS_FLAG) deployment/magento-consumer -o jsonpath='{.metadata.annotations.magento-consumer-replicas-backup}' 2>/dev/null); \
+		SAVED=$${SAVED:-1}; \
+		echo "    restoring magento-consumer replicas=$$SAVED"; \
+		$(KUBECTL) scale $(NS_FLAG) deployment/magento-consumer --replicas=$$SAVED 2>/dev/null || true
 	@$(KUBECTL) rollout status $(NS_FLAG) deployment/magento-consumer --timeout=120s 2>/dev/null || true
 endef
 
