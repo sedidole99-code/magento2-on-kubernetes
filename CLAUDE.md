@@ -116,7 +116,7 @@ deploy/
                      #   Install job is immutable — must be deleted before re-creation
 ```
 
-Steps compose progressively: step-1 (app+db+es) → step-2 (+redis+HPA) → step-3 (+varnish, ingress rerouted) → step-4 (+rabbitmq+consumer workers+backups). All overlays build on step-4.
+Steps compose progressively: step-1 (app+db+es) → step-2 (+redis+HPA) → step-3 (+varnish, ingress rerouted) → step-4 (+rabbitmq+cron-driven consumers+backups). All overlays build on step-4. The dedicated `magento-consumer` Deployment base ships with step-4 but is **commented out by default** — queue consumers run from `magento-cron` via `cron_consumers_runner`. To switch to the persistent-worker model, uncomment `../../bases/consumer` in `deploy/walkthrough/step-4/kustomization.yaml`, uncomment the matching patch lines in the overlays, and flip `CRON_CONSUMERS_RUNNER` to `false` in `additional.env`.
 
 The `redis` base ships **three separate StatefulSets** — `redis-cache` (default cache, ephemeral, LRU 512mb), `redis-page-cache` (FPC, ephemeral, LRU 1024mb), `redis-sessions` (sessions, `VolumeClaimTemplate` 1Gi + AOF persistence, `noeviction`). All three carry label `app: redis` with an additional `role: cache|page-cache|sessions` label. Magento reads three independent env-var groups (`REDIS_CACHE_*`, `REDIS_FPC_*`, `REDIS_SESSION_*`) via `src/app/etc/env.docker.php` — each points at its own Service. `bin/magento cache:flush` only touches `redis-cache`; FPC survives.
 
@@ -126,9 +126,11 @@ The `magento-web` pod runs 3 containers + 3 init containers:
 - **Init:** `wait-for-db` (netcat), `wait-for-elasticsearch` (curl), `setup` (runs `setup:upgrade`/`app:config:import` if needed)
 - **Main:** `magento-web` (Nginx + PHP-FPM via supervisord), `php-metrics-exporter`, `nginx-metrics-exporter`
 
-The `magento-consumer` pod (step-4+) runs 1 container + 2 init containers:
+The `magento-consumer` pod (step-4+, **opt-in**) runs 1 container + 2 init containers:
 - **Init:** `wait-for-web` (curl health_check.php), `wait-for-rabbitmq` (netcat)
 - **Main:** `magento-consumer` (starts all queue consumers via `queue:consumers:start` with `--max-messages` restart cycle)
+
+When the dedicated pod is disabled (the default), `magento-cron` spawns consumers every cron tick, each running until `CRON_CONSUMERS_MAX_MESSAGES` messages or an empty queue (via `CONSUMERS_WAIT_FOR_MESSAGES=0`). `CRON_CONSUMERS_LIST` is empty in step-4 — Magento treats an empty list as *run every declared consumer*, so whatever `queue_consumer.xml` declarations the image ships (core + custom modules) are what runs. Curate per-env by overriding `CRON_CONSUMERS_LIST` (comma-separated) in an overlay's `additional.env` via `configMapGenerator` merge.
 
 ### Configuration Flow
 
@@ -138,7 +140,7 @@ Environment variables flow through layers (later overrides earlier):
 3. ConfigMap `additional` (step-specific: Redis, Varnish, AMQP — merged per step)
 4. Secret `magento-admin` (admin credentials)
 
-At runtime, `src/app/etc/env.docker.php` reads env vars via `getenv()` to build Magento's config array. Magento's `CONFIG__DEFAULT__*` pattern sets admin-locked values from env vars. When `CRON_CONSUMERS_RUNNER=false` (set in step-4), cron-based consumer running is disabled in favor of the dedicated consumer worker deployment.
+At runtime, `src/app/etc/env.docker.php` reads env vars via `getenv()` to build Magento's config array. Magento's `CONFIG__DEFAULT__*` pattern sets admin-locked values from env vars. `CRON_CONSUMERS_RUNNER` is tri-state: `true` (step-4 default) populates `cron_consumers_runner` with `cron_run=true`, `max_messages=$CRON_CONSUMERS_MAX_MESSAGES`, and `consumers=explode(',', $CRON_CONSUMERS_LIST)` so `magento-cron` spawns a curated subset; `false` writes an explicit disabled block and leaves spawning to the dedicated `magento-consumer` Deployment; unset leaves Magento's own default. `CONSUMERS_WAIT_FOR_MESSAGES=0` sets `queue.consumers_wait_for_messages` so any `queue:consumers:start` process — cron-spawned or Deployment-spawned — exits on an empty queue instead of polling indefinitely.
 
 ### Smart Deploy (`deploy/deploy.sh`)
 

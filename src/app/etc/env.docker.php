@@ -131,11 +131,25 @@ if (getenv('AMQP_HOST')) {
     ];
 }
 
-if (getenv('CRON_CONSUMERS_RUNNER') === 'false') {
+if (getenv('CONSUMERS_WAIT_FOR_MESSAGES') !== false) {
+    $env['queue']['consumers_wait_for_messages'] = (int) getenv('CONSUMERS_WAIT_FOR_MESSAGES');
+}
+
+if (getenv('CRON_CONSUMERS_RUNNER') === 'true') {
+    $consumers = array_values(array_filter(array_map(
+        'trim',
+        explode(',', getenv('CRON_CONSUMERS_LIST') ?: '')
+    )));
+    $env['cron_consumers_runner'] = [
+        'cron_run' => true,
+        'max_messages' => (int) (getenv('CRON_CONSUMERS_MAX_MESSAGES') ?: 0),
+        'consumers' => $consumers,
+    ];
+} elseif (getenv('CRON_CONSUMERS_RUNNER') === 'false') {
     $env['cron_consumers_runner'] = [
         'cron_run' => false,
         'max_messages' => 0,
-        'consumers' => []
+        'consumers' => [],
     ];
 }
 

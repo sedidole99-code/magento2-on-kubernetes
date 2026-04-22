@@ -7,7 +7,12 @@ resources:
 - ../step-3
 - ../../bases/backup
 - ../../bases/rabbitmq
-- ../../bases/consumer
+# Dedicated consumer Deployment is disabled by default.
+# Queue consumers run via magento-cron's cron_consumers_runner using the
+# CRON_CONSUMERS_LIST in config/additional.env. Uncomment the line below to
+# re-enable the persistent worker pod (and also uncomment the per-env patches
+# in deploy/overlays/*/kustomization.yaml).
+# - ../../bases/consumer
 
 
 configMapGenerator:

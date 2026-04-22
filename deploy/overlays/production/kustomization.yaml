@@ -16,7 +16,8 @@ configMapGenerator:
   name: config
 patches:
 - path: patches/magento-web.yaml
-- path: patches/magento-consumer.yaml
+# Re-enable alongside ../../bases/consumer in walkthrough/step-4/kustomization.yaml
+# - path: patches/magento-consumer.yaml
 - path: patches/hpa.yaml
 - path: patches/ingress.yaml
 - path: patches/database.yaml
