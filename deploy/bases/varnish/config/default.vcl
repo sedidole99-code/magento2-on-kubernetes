@@ -59,6 +59,16 @@ sub vcl_recv {
         return (pass);
     }
 
+    # Bot-aware caching: known crawlers are normalized to a logged-out,
+    # cookie-less request so they cannot pollute the session-variant cache.
+    # Treat them as anonymous; Magento returns the same FPC variant a fresh
+    # visitor would see.
+    if (req.http.user-agent ~ "(?i)(googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|applebot|linkedinbot|ahrefsbot|semrushbot|mj12bot|petalbot|sogou|exabot|gptbot|ccbot|claudebot)") {
+        unset req.http.Cookie;
+        unset req.http.Authorization;
+        set req.http.X-Bot = "1";
+    }
+
     # Bypass shopping cart, checkout and search requests
     if (req.url ~ "/checkout" || req.url ~ "/catalogsearch") {
         return (pass);
@@ -147,6 +157,14 @@ sub process_graphql_headers {
 
 sub vcl_backend_response {
 
+    # Saint-mode equivalent (Varnish 7.x): abandon background fetches that
+    # hit a 5xx so the existing cached object survives in the grace window
+    # instead of being replaced with a Hit-For-Pass. Foreground 5xx still
+    # surfaces to the client through the normal error path.
+    if (beresp.status >= 500 && bereq.is_bgfetch) {
+        return (abandon);
+    }
+
     set beresp.grace = 3d;
 
     if (beresp.http.content-type ~ "text") {
@@ -162,7 +180,14 @@ sub vcl_backend_response {
     }
 
     # cache only successfully responses and 404s
-    if (beresp.status != 200 && beresp.status != 404) {
+    if (beresp.status >= 500) {
+        # Transient origin errors: don't HFP-trap for 2 minutes via the
+        # generic uncacheable block below. Brief pass so a recovering
+        # backend can repopulate the object on the next request.
+        set beresp.ttl = 5s;
+        set beresp.uncacheable = true;
+        return (deliver);
+    } elsif (beresp.status != 200 && beresp.status != 404) {
         set beresp.ttl = 0s;
         set beresp.uncacheable = true;
         return (deliver);
