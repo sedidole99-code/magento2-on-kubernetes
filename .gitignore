@@ -4,3 +4,9 @@ services.html
 
 # Claude Code local config
 .claude/
+.claude-flow/
+.mcp.json
+
+# npm
+package-lock.json
+package.json
