@@ -17,6 +17,12 @@ resources:
 
 components:
 - ../../components/resource-limits-added
+# Read replicas via ProxySQL are off in step-4 by default. Production
+# overlay enables them. To enable for staging/dev/test/kind, add
+# `../../components/proxysql` to that overlay's `components:` list. Note
+# this ships 2 ProxySQL pods + 2 MySQL replicas; minikube needs ~2 GiB
+# additional memory and ~25 GiB disk.
+# - ../../components/proxysql
 
 configMapGenerator:
 - behavior: merge

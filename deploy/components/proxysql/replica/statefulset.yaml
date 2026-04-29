@@ -1,0 +1,172 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db-replica
+  labels:
+    app: db-replica
+    role: replica
+    k8s-app: magento
+spec:
+  serviceName: db-replica-headless
+  replicas: 2
+  selector:
+    matchLabels:
+      app: db-replica
+      role: replica
+  template:
+    metadata:
+      labels:
+        app: db-replica
+        role: replica
+        k8s-app: magento
+    spec:
+      initContainers:
+      - name: set-volume-ownership
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command:
+        - /bin/sh
+        args:
+        - -c
+        - chown -R 1001:1001 /var/lib/mysql
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: data
+          subPath: mysql
+      - name: wait-for-primary
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Waiting for db-primary..."
+          while ! nc -z db-primary 3306; do sleep 2; done
+          echo "db-primary is ready"
+      - name: bootstrap-replica
+        image: percona:8.0@sha256:5a09f82af8005b1df25cffa7a24472b2eaa57c4dbb355c050e24b2dd062e1005
+        command: ["/bin/bash", "/scripts/bootstrap-replica.sh"]
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: REPLICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-replica-credentials
+              key: REPLICA_PASSWORD
+        - name: CLONE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-replica-credentials
+              key: CLONE_PASSWORD
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: data
+          subPath: mysql
+        - mountPath: /etc/my.cnf.d/replica.cnf
+          name: mycnf
+          subPath: my.cnf
+        - mountPath: /scripts
+          name: scripts
+      containers:
+      - name: db-replica
+        image: percona:8.0@sha256:5a09f82af8005b1df25cffa7a24472b2eaa57c4dbb355c050e24b2dd062e1005
+        # Wrapper sets server_id (writes /etc/my.cnf.d/server-id.cnf) before
+        # exec-ing mysqld so the running instance has a unique replication
+        # identity per pod ordinal.
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -euo pipefail
+          ORDINAL="${POD_NAME##*-}"
+          SERVER_ID=$((100 + ORDINAL))
+          cat >/etc/my.cnf.d/server-id.cnf <<EOF
+          [mysqld]
+          server_id = ${SERVER_ID}
+          report_host = ${POD_NAME}.db-replica-headless
+          EOF
+          exec docker-entrypoint.sh mysqld
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_DATABASE
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_PASSWORD
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: data
+          subPath: mysql
+        - mountPath: /etc/my.cnf.d/replica.cnf
+          name: mycnf
+          subPath: my.cnf
+        readinessProbe:
+          # Only Ready when actively replicating. Percona 8.0 uses Replica_*
+          # column names — the legacy Slave_* strings never appear.
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - |
+              status=$(mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -e "SHOW REPLICA STATUS\G" 2>/dev/null)
+              echo "$status" | grep -q "Replica_IO_Running: Yes" && \
+              echo "$status" | grep -q "Replica_SQL_Running: Yes"
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 4
+        livenessProbe:
+          exec:
+            command: ["mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$(MYSQL_ROOT_PASSWORD)"]
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 1Gi
+          limits:
+            memory: 1Gi
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      volumes:
+      - name: mycnf
+        configMap:
+          name: db-replica-mycnf
+      - name: scripts
+        configMap:
+          name: db-replica-scripts
+          defaultMode: 0755
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi

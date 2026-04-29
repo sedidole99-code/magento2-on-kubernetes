@@ -1,0 +1,75 @@
+---
+# Replace the base allow-db ingress block to add proxysql + db-replica.
+#
+# Original allows: magento web/cron/install/consumer + backup/db on 3306.
+# After component is active:
+#   - ProxySQL needs ingress on 3306 to actually run queries against primary.
+#   - db-replica pods need ingress on 3306 to pull binlogs (the IO thread
+#     connects out from the replica to the primary on 3306).
+#   - The original magento entries are retained for forward compatibility:
+#     if an operator removes the component but forgets to revert the Service
+#     swap, magento pods would still be blocked at the ProxySQL Service —
+#     keeping these entries means primary-direct connections (e.g., explicit
+#     DB_HOST=db-primary overrides) still work for emergency adhoc access.
+#   - The backup/db entry is retained but db-backup is also explicitly
+#     repointed at db-primary by patches/db-backup-cronjob.yaml.
+#
+# Using strategic-merge here means we can replace the ingress list cleanly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: cron
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: install
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: consumer
+    - podSelector:
+        matchLabels:
+          app: backup
+          component: db
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    - podSelector:
+        matchLabels:
+          app: db-replica
+    - podSelector:
+        matchLabels:
+          app: db-primary-bootstrap
+    ports:
+    - protocol: TCP
+      port: 3306
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

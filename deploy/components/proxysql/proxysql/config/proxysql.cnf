@@ -1,0 +1,198 @@
+#
+# proxysql.cnf — bootstrap configuration for ProxySQL.
+#
+# This file is consumed once on first start (when /var/lib/proxysql/proxysql.db
+# does not yet exist). After that, the persisted SQLite DB is the source of
+# truth and this file is ignored. To re-apply the file, the operator must
+# either delete the DB or issue LOAD … TO RUNTIME / SAVE … TO DISK manually.
+#
+# This component does NOT ship a scheduled config-reconcile CronJob. Reasons:
+#   1. Operators tune mysql_query_rules from stats_mysql_query_digest. A
+#      scheduled reload would overwrite that tuning.
+#   2. Component re-apply is the natural reconcile point — the ConfigMap hash
+#      changes, the StatefulSet rolls, and the new pod starts from this file.
+#
+
+datadir="/var/lib/proxysql"
+errorlog="/var/lib/proxysql/proxysql.log"
+
+# Admin variables.
+admin_variables=
+{
+    # admin_credentials is a colon-separated list of user:password pairs. The
+    # local "admin" account is for in-pod admin queries; "cluster" is the
+    # account ProxySQL pods use to read each other's runtime tables.
+    #
+    # Both passwords are templated at startup from envFrom (see statefulset.yaml).
+    admin_credentials="admin:${ADMIN_PASSWORD};cluster:${CLUSTER_PASSWORD}"
+
+    mysql_ifaces="0.0.0.0:6032"
+
+    # Cluster identity — required for ProxySQL Cluster mode.
+    cluster_username="cluster"
+    cluster_password="${CLUSTER_PASSWORD}"
+
+    # Sync interval and version checks for cluster propagation.
+    cluster_check_interval_ms=200
+    cluster_check_status_frequency=100
+
+    # Tell every pod to fetch all five runtime tables from peers.
+    cluster_mysql_query_rules_save_to_disk=true
+    cluster_mysql_servers_save_to_disk=true
+    cluster_mysql_users_save_to_disk=true
+    cluster_proxysql_servers_save_to_disk=true
+    cluster_mysql_variables_save_to_disk=true
+
+    cluster_mysql_query_rules_diffs_before_sync=3
+    cluster_mysql_servers_diffs_before_sync=3
+    cluster_mysql_users_diffs_before_sync=3
+    cluster_proxysql_servers_diffs_before_sync=3
+    cluster_mysql_variables_diffs_before_sync=3
+}
+
+mysql_variables=
+{
+    threads=4
+    max_connections=1000
+    default_query_delay=0
+    default_query_timeout=36000000
+    have_compress=true
+    poll_timeout=2000
+    interfaces="0.0.0.0:6033"
+    default_schema="information_schema"
+    stacksize=1048576
+    server_version="8.0.34"
+    connect_timeout_server=3000
+    monitor_history=600000
+    monitor_connect_interval=60000
+    monitor_ping_interval=10000
+    monitor_replication_lag_interval=10000
+    monitor_username="${MONITOR_USER}"
+    monitor_password="${MONITOR_PASSWORD}"
+    # If all replicas exceed max_replication_lag simultaneously, fall back to
+    # the writer instead of returning errors.
+    monitor_writer_is_also_reader=1
+    # Drop a replica from hg=10 only after 2 consecutive lag pings exceed
+    # max_replication_lag — avoids flapping on transient spikes.
+    monitor_replication_lag_count=2
+    ping_interval_server_msec=120000
+    commands_stats=true
+    sessions_sort=true
+    multiplexing=1
+    # Keep all reads inside an open transaction on the writer hostgroup, even
+    # if subsequent SELECTs would otherwise match a replica routing rule.
+    # Second line of defence behind the read-after-write rules below.
+    transaction_persistent=1
+}
+
+# Replication topology: writer in hg=0, readers in hg=10. ProxySQL's monitor
+# auto-promotes/demotes between groups based on read_only state; since our
+# replicas are super_read_only=ON they cannot be promoted by ProxySQL — that
+# is intentional, since we do not run a failover controller.
+mysql_replication_hostgroups=
+(
+    {
+        writer_hostgroup=0,
+        reader_hostgroup=10,
+        comment="db-primary writer / db-replica readers"
+    }
+)
+
+mysql_servers=
+(
+    {
+        address="db-primary",
+        port=3306,
+        hostgroup=0,
+        weight=1000,
+        max_connections=200,
+        comment="primary (writes)"
+    },
+    {
+        address="db-replica-0.db-replica-headless",
+        port=3306,
+        hostgroup=10,
+        weight=1000,
+        max_replication_lag=30,
+        max_connections=200,
+        comment="replica 0 (reads)"
+    },
+    {
+        address="db-replica-1.db-replica-headless",
+        port=3306,
+        hostgroup=10,
+        weight=1000,
+        max_replication_lag=30,
+        max_connections=200,
+        comment="replica 1 (reads)"
+    }
+)
+
+# The Magento `magento` user. The actual password is loaded by the manual
+# users-reload Job (reconcile/users-reload-job.yaml) which reads from
+# database-credentials. The placeholder string below is overwritten on first
+# Job run; until then mysql_users is empty and frontend connections fail.
+# Document this in the component README so first-deploy operators know to
+# trigger the Job.
+mysql_users=
+(
+    {
+        username="magento",
+        password="placeholder-replaced-by-users-reload-job",
+        default_hostgroup=0,
+        active=1,
+        max_connections=1000,
+        transaction_persistent=1
+    }
+)
+
+# Query rules — order matters (rule_id ascending). See component README for
+# the rationale on each rule and how to extend rules 30-33 from
+# stats_mysql_query_digest analysis.
+mysql_query_rules=
+(
+    # 10-11: tmp/temp tables created on the writer must read from the writer.
+    { rule_id=10, active=1, match_pattern="^SELECT.*(tmp|temp)\\b",          destination_hostgroup=0,  apply=1 },
+    { rule_id=11, active=1, match_pattern="search_tmp_[a-zA-Z0-9_]*",        destination_hostgroup=0,  apply=1 },
+
+    # 20-21: explicit-write reads stay on the writer.
+    { rule_id=20, active=1, match_digest="^SELECT.*FOR UPDATE",              destination_hostgroup=0,  apply=1 },
+    { rule_id=21, active=1, match_digest="^SELECT.*LOCK IN SHARE MODE",      destination_hostgroup=0,  apply=1 },
+
+    # 30-33: read-after-write hot tables — checkout, sales, customer mutation
+    # paths. Catches autocommit INSERT-then-SELECT outside transactions, which
+    # would otherwise slip past transaction_persistent.
+    { rule_id=30, active=1, match_pattern="\\bquote(_[a-z_]+)?\\b",          destination_hostgroup=0,  apply=1 },
+    { rule_id=31, active=1, match_pattern="\\bsales_[a-z_]+\\b",             destination_hostgroup=0,  apply=1 },
+    { rule_id=32, active=1, match_pattern="\\bcheckout_[a-z_]+\\b",          destination_hostgroup=0,  apply=1 },
+    { rule_id=33, active=1, match_pattern="\\bcustomer_(entity|address_entity|grid_flat)\\b", destination_hostgroup=0,  apply=1 },
+
+    # 40: rewrite client-side isolation hints — Magento's session init can
+    # send these and they are not meaningful at the proxy layer.
+    { rule_id=40, active=1, match_pattern="^SET TRANSACTION ISOLATION(.*)",  replace_pattern="SELECT 1 LIMIT 0", apply=1 },
+
+    # 50: every other SELECT goes to the readers.
+    { rule_id=50, active=1, match_digest="^SELECT",                          destination_hostgroup=10, apply=1 }
+
+    # No fallthrough rule — anything that doesn't match goes to the user's
+    # default_hostgroup (0 = writer), which correctly handles every DML/DDL
+    # statement.
+)
+
+# Cluster peers — both pods. ProxySQL Cluster sync converges via these
+# headless-DNS hostnames.
+proxysql_servers=
+(
+    {
+        hostname="proxysql-0.proxysql-admin",
+        port=6032,
+        weight=0,
+        comment="proxysql replica 0"
+    },
+    {
+        hostname="proxysql-1.proxysql-admin",
+        port=6032,
+        weight=0,
+        comment="proxysql replica 1"
+    }
+)

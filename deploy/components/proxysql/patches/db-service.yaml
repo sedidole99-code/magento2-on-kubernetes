@@ -1,0 +1,28 @@
+---
+# Repoint the existing `db` Service at ProxySQL.
+#
+# Before:  selector: app=db,        port 3306, targetPort 3306 (default)
+# After:   selector: app=proxysql,  port 3306, targetPort 6033
+#
+# Magento pods continue to use DB_HOST=db unchanged. The DNS name
+# `db.<ns>.svc.cluster.local:3306` now lands on ProxySQL on its MySQL
+# protocol port, which routes to db-primary or db-replica based on the
+# query rules.
+#
+# We use a strategic-merge replace on `spec` because a strategic merge of
+# `selector` alone would leave the old selector keys in place (kustomize
+# strategic merge of maps is additive). Replace ensures the swap is clean.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    app: db
+    k8s-app: magento
+spec:
+  selector:
+    app: proxysql
+  ports:
+  - name: db
+    port: 3306
+    targetPort: 6033

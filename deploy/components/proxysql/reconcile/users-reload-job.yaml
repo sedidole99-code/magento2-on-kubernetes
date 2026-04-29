@@ -1,0 +1,107 @@
+---
+# Manual on-demand Job. Trigger after database-credentials rotates:
+#
+#   kubectl -n <ns> create job --from=job/proxysql-users-reload-template \
+#     proxysql-users-reload-$(date +%s)
+#
+# Targets proxysql-0.proxysql-admin (a fixed cluster member, NOT the
+# load-balanced proxysql Service). ProxySQL Cluster sync is eventually-
+# consistent and last-writer-wins — hitting the load-balanced Service hashes
+# to a random pod, and a brief partition could leave the unpicked pod
+# without the new credentials. Targeting the lowest-ordinal pod gives a
+# stable "leader" for admin writes; the second pod picks it up via cluster
+# sync within a heartbeat (cluster_check_interval_ms=200).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: proxysql-users-reload-template
+  labels:
+    app: proxysql-users-reload
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: proxysql-users-reload
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: reload
+        image: proxysql/proxysql:2.7.1@sha256:f1da4d35e92a44eb19e3a8aaf18ada7c17fdfeebb33ff8e2bc6bf664a2716b89
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -euo pipefail
+          mysql -h proxysql-0.proxysql-admin -P 6032 \
+                -u admin -p"$ADMIN_PASSWORD" --batch <<SQL
+          INSERT INTO mysql_users(username, password, default_hostgroup, active, transaction_persistent, max_connections)
+            VALUES('$DB_USER', '$DB_PASS', 0, 1, 1, 1000)
+            ON DUPLICATE KEY UPDATE
+              password = VALUES(password),
+              default_hostgroup = VALUES(default_hostgroup),
+              active = VALUES(active),
+              transaction_persistent = VALUES(transaction_persistent),
+              max_connections = VALUES(max_connections);
+          LOAD MYSQL USERS TO RUNTIME;
+          SAVE MYSQL USERS TO DISK;
+          SELECT 'mysql_users after reload:' AS info;
+          SELECT username, default_hostgroup, active FROM runtime_mysql_users;
+          SQL
+          echo "Cluster sync will propagate to proxysql-1 within cluster_check_interval_ms=200ms"
+        env:
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: proxysql-credentials
+              key: ADMIN_PASSWORD
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_USER
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_PASSWORD
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+---
+# Egress for users-reload Job pods: reach proxysql-0:6032 + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-proxysql-users-reload
+spec:
+  podSelector:
+    matchLabels:
+      app: proxysql-users-reload
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 6032
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

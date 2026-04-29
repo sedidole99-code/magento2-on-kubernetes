@@ -1,0 +1,47 @@
+---
+# Widen db-backup's egress to allow reaching db-primary.
+#
+# Base allow-db-backup permits egress to `app: db` on 3306 + DNS. The new
+# `db-primary` Service still selects `app: db` pods, so the existing
+# podSelector match is sufficient — but in case anyone narrows it later,
+# this patch makes the intent explicit by re-stating the egress block. Also
+# adds db-replica access in case a future enhancement routes mysqldump
+# through replicas for I/O offload.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-backup
+spec:
+  podSelector:
+    matchLabels:
+      app: backup
+      component: db
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db-replica
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

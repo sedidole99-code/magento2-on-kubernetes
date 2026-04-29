@@ -1,0 +1,39 @@
+---
+# Magento-protocol port. This is what every pod that says DB_HOST=db ends up
+# hitting after the Service swap (deploy/bases/database/percona.yaml's `db`
+# Service is patched to selector app=proxysql, targetPort=6033). This
+# `proxysql` Service is the explicit name; `db` is the alias used by
+# Magento's existing env vars.
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxysql
+  labels:
+    app: proxysql
+    k8s-app: magento
+spec:
+  selector:
+    app: proxysql
+  ports:
+  - name: mysql
+    port: 6033
+    targetPort: 6033
+
+---
+# Headless Service for cluster sync + manual admin queries. Operators
+# targeting a specific pod use proxysql-0.proxysql-admin / proxysql-1.proxysql-admin.
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxysql-admin
+  labels:
+    app: proxysql
+    k8s-app: magento
+spec:
+  clusterIP: None
+  selector:
+    app: proxysql
+  ports:
+  - name: admin
+    port: 6032
+    targetPort: 6032

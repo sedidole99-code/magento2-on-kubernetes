@@ -1,0 +1,138 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: proxysql
+  labels:
+    app: proxysql
+    k8s-app: magento
+spec:
+  serviceName: proxysql-admin
+  replicas: 2
+  selector:
+    matchLabels:
+      app: proxysql
+  template:
+    metadata:
+      labels:
+        app: proxysql
+        k8s-app: magento
+    spec:
+      initContainers:
+      - name: wait-for-db-primary
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Waiting for db-primary..."
+          while ! nc -z db-primary 3306; do sleep 2; done
+          echo "db-primary reachable"
+      - name: wait-for-db-replicas
+        # Headless-DNS reachability — we don't need replicas Ready, just
+        # resolvable + listening on 3306. ProxySQL's monitor does the proper
+        # health/lag tracking once the proxy is up.
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Waiting for db-replica-0..."
+          until nc -z db-replica-0.db-replica-headless 3306; do sleep 2; done
+          echo "Waiting for db-replica-1..."
+          until nc -z db-replica-1.db-replica-headless 3306; do sleep 2; done
+          echo "Both replicas reachable"
+      - name: render-config
+        # envsubst the ${ADMIN_PASSWORD}/${MONITOR_PASSWORD}/${MONITOR_USER}/${CLUSTER_PASSWORD}
+        # placeholders in proxysql.cnf into a writable emptyDir before mysqld
+        # starts. Avoids embedding secrets in the ConfigMap.
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          set -eu
+          # Minimal envsubst-equivalent using sed; busybox has no envsubst.
+          sed -e "s|\${ADMIN_PASSWORD}|$ADMIN_PASSWORD|g" \
+              -e "s|\${CLUSTER_PASSWORD}|$CLUSTER_PASSWORD|g" \
+              -e "s|\${MONITOR_USER}|$MONITOR_USER|g" \
+              -e "s|\${MONITOR_PASSWORD}|$MONITOR_PASSWORD|g" \
+              /config-template/proxysql.cnf > /config/proxysql.cnf
+          echo "Rendered /config/proxysql.cnf ($(wc -c </config/proxysql.cnf) bytes)"
+        env:
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: proxysql-credentials
+              key: ADMIN_PASSWORD
+        - name: CLUSTER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: proxysql-credentials
+              key: CLUSTER_PASSWORD
+        - name: MONITOR_USER
+          valueFrom:
+            secretKeyRef:
+              name: monitor-credentials
+              key: MONITOR_USER
+        - name: MONITOR_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: monitor-credentials
+              key: MONITOR_PASSWORD
+        volumeMounts:
+        - name: config-template
+          mountPath: /config-template
+        - name: config
+          mountPath: /config
+      containers:
+      - name: proxysql
+        image: proxysql/proxysql:2.7.1@sha256:f1da4d35e92a44eb19e3a8aaf18ada7c17fdfeebb33ff8e2bc6bf664a2716b89
+        # Force ProxySQL to re-read /etc/proxysql.cnf on every start by
+        # passing -D /var/lib/proxysql --initial. Without --initial, the
+        # SQLite DB persisted from a prior boot wins and config changes are
+        # ignored. We rely on the kustomize ConfigMap hash + Secret rotation
+        # being reflected in admin variables on rollout.
+        args: ["-f", "-D", "/var/lib/proxysql", "--initial", "-c", "/etc/proxysql.cnf"]
+        ports:
+        - name: mysql
+          containerPort: 6033
+        - name: admin
+          containerPort: 6032
+        volumeMounts:
+        - name: config
+          mountPath: /etc/proxysql.cnf
+          subPath: proxysql.cnf
+        - name: data
+          mountPath: /var/lib/proxysql
+        readinessProbe:
+          tcpSocket:
+            port: 6033
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 6033
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: config-template
+        configMap:
+          name: proxysql-cnf
+      - name: config
+        emptyDir:
+          sizeLimit: 1Mi
+      - name: data
+        emptyDir:
+          sizeLimit: 64Mi

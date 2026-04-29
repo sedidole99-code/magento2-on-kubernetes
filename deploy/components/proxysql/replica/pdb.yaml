@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: db-replica
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: db-replica
+      role: replica

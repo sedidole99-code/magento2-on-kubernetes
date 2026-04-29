@@ -8,6 +8,12 @@ namespace: production
 resources:
 - ../../walkthrough/step-4
 
+# Production gets ProxySQL + 2 MySQL read replicas by default. Comment out
+# the line below to revert to the single-primary topology (the rest of the
+# component, my.cnf binlog enablement, Service swap, db-primary Service,
+# auto-reverts together with the components: entry).
+components:
+- ../../components/proxysql
 
 configMapGenerator:
 - behavior: merge

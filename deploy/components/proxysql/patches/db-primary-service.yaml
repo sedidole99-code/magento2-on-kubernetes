@@ -1,0 +1,25 @@
+---
+# New Service that selects the primary StatefulSet pods directly.
+#
+# This is what ProxySQL targets for hostgroup 0 (writes), what the db-backup
+# CronJob is repointed at (mysqldump needs deterministic GTID positions),
+# and what operators use for ad-hoc primary-only work (SHOW MASTER STATUS,
+# binlog inspection, schema mutations).
+#
+# This file is a *resource*, not a patch — it lives under patches/ for layout
+# proximity to the related db Service patch (db-service.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-primary
+  labels:
+    app: db
+    role: primary
+    k8s-app: magento
+spec:
+  selector:
+    app: db
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306

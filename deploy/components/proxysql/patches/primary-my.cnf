@@ -1,0 +1,31 @@
+[mysqld]
+innodb_file_per_table           = 1
+max_allowed_packet              = 256M
+innodb_buffer_pool_size         = 512M
+innodb_buffer_pool_chunk_size   = 128M
+innodb_buffer_pool_instances    = 4
+innodb_log_file_size            = 256M
+innodb_log_files_in_group       = 2
+innodb_flush_method             = O_DIRECT
+innodb_flush_log_at_trx_commit  = 2
+explicit_defaults_for_timestamp = 1
+log_bin_trust_function_creators = 1
+
+# Replication source (added by deploy/components/proxysql).
+# Enabling these values requires a one-time rolling restart of the db
+# StatefulSet on first Component apply (~30-60s blip). The kustomize
+# ConfigMap hash mechanism triggers the rollout automatically; cut-over
+# deploy MUST run as `make deploy-maintenance prod` to avoid mixed-routing
+# PHP-FPM workers.
+server_id                       = 1
+gtid_mode                       = ON
+enforce_gtid_consistency        = ON
+log_bin                         = /var/lib/mysql/mysql-bin
+binlog_format                   = ROW
+binlog_expire_logs_seconds      = 604800
+relay_log                       = /var/lib/mysql/relay-bin
+
+# Loaded at startup so the recipient (replica) can issue CLONE INSTANCE.
+# `INSTALL PLUGIN clone` is deliberately NOT issued by the bootstrap Job —
+# it would error "Plugin 'clone' already installed" and break idempotency.
+plugin_load_add                 = mysql_clone.so

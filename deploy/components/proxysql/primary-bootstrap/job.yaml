@@ -1,0 +1,124 @@
+---
+# Idempotent one-shot Job that creates the three users ProxySQL + replicas
+# need on the primary:
+#
+#   replica_user — used by replicas in CHANGE REPLICATION SOURCE TO ...
+#                  Granted REPLICATION SLAVE.
+#   clone_user   — used by replicas as the donor user in CLONE INSTANCE.
+#                  Granted BACKUP_ADMIN.
+#   monitor      — used by ProxySQL's monitor module to ping all backends.
+#                  Granted USAGE, REPLICATION CLIENT (for SHOW REPLICA STATUS).
+#
+# Deliberately omitted:
+#   * INSTALL PLUGIN clone — already loaded via plugin_load_add in
+#     patches/primary-my.cnf; INSTALL would error on re-run.
+#   * SET PERSIST clone_valid_donor_list — donor doesn't read this; the
+#     recipient (replica) sets it on itself before issuing CLONE INSTANCE.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-primary-bootstrap
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 6
+  template:
+    metadata:
+      name: db-primary-bootstrap
+      labels:
+        app: db-primary-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-db-primary
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Waiting for db-primary..."
+          while ! nc -z db-primary 3306; do sleep 2; done
+          echo "db-primary is ready"
+      containers:
+      - name: bootstrap
+        image: percona:8.0@sha256:5a09f82af8005b1df25cffa7a24472b2eaa57c4dbb355c050e24b2dd062e1005
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -euo pipefail
+          mysql -h db-primary -u root -p"$MYSQL_ROOT_PASSWORD" --batch <<SQL
+          CREATE USER IF NOT EXISTS 'replica_user'@'%' IDENTIFIED BY '$REPLICA_PASSWORD';
+          ALTER USER 'replica_user'@'%' IDENTIFIED BY '$REPLICA_PASSWORD';
+          GRANT REPLICATION SLAVE ON *.* TO 'replica_user'@'%';
+
+          CREATE USER IF NOT EXISTS 'clone_user'@'%' IDENTIFIED BY '$CLONE_PASSWORD';
+          ALTER USER 'clone_user'@'%' IDENTIFIED BY '$CLONE_PASSWORD';
+          GRANT BACKUP_ADMIN ON *.* TO 'clone_user'@'%';
+
+          CREATE USER IF NOT EXISTS 'monitor'@'%' IDENTIFIED BY '$MONITOR_PASSWORD';
+          ALTER USER 'monitor'@'%' IDENTIFIED BY '$MONITOR_PASSWORD';
+          GRANT USAGE, REPLICATION CLIENT ON *.* TO 'monitor'@'%';
+
+          FLUSH PRIVILEGES;
+          SQL
+          echo "Primary users provisioned: replica_user, clone_user, monitor"
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_ROOT_PASSWORD
+        - name: REPLICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-replica-credentials
+              key: REPLICA_PASSWORD
+        - name: CLONE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-replica-credentials
+              key: CLONE_PASSWORD
+        - name: MONITOR_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: monitor-credentials
+              key: MONITOR_PASSWORD
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+# Egress for the bootstrap Job pod: reach db-primary on 3306 + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-primary-bootstrap
+spec:
+  podSelector:
+    matchLabels:
+      app: db-primary-bootstrap
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

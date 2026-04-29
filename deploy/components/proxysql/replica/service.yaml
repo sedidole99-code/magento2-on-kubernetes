@@ -1,0 +1,43 @@
+---
+# Headless Service — provides per-pod stable DNS:
+#   db-replica-0.db-replica-headless.<ns>.svc.cluster.local
+#   db-replica-1.db-replica-headless.<ns>.svc.cluster.local
+# These are the exact hostnames ProxySQL uses in its mysql_servers rows.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-replica-headless
+  labels:
+    app: db-replica
+    role: replica
+    k8s-app: magento
+spec:
+  clusterIP: None
+  selector:
+    app: db-replica
+    role: replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+
+---
+# Round-robin ClusterIP for adhoc tools / dashboard exploration. ProxySQL
+# does NOT use this — it dials the headless DNS of individual pods so its
+# health monitor can track each replica independently.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-replica
+  labels:
+    app: db-replica
+    role: replica
+    k8s-app: magento
+spec:
+  selector:
+    app: db-replica
+    role: replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306

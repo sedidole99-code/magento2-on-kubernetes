@@ -1,0 +1,44 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-replica
+spec:
+  podSelector:
+    matchLabels:
+      app: db-replica
+      role: replica
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # ProxySQL pods read SELECT traffic from replicas on 3306.
+  - from:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  egress:
+  # Replica IO thread connects to the primary on 3306 to pull binlogs.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # DNS resolution via kube-dns.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

@@ -1,0 +1,41 @@
+---
+# Repoint the daily db-backup mysqldump from `db` -> `db-primary`.
+#
+# After the Service swap, `db` resolves to ProxySQL. mysqldump with
+# --single-transaction --master-data=2 needs a deterministic GTID position;
+# routing through ProxySQL would scatter FLUSH / position-read calls across
+# multiplexed connections and risk corrupted GTID metadata in the dump.
+#
+# This patch substitutes the entire container args block for the db-backup
+# container, replacing the hardcoded `-h db` with `-h db-primary`. The
+# wait-for-db init container is not patched — pinging ProxySQL on 3306 still
+# correctly indicates "DB layer reachable."
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: db-backup
+            args:
+            - -c
+            - |
+              set -e
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              BACKUP_DIR=/backup/db
+              mkdir -p "$BACKUP_DIR"
+              echo "Starting database backup: db-${TIMESTAMP}.sql.gz"
+              mysqldump -h db-primary -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" \
+                --single-transaction --quick --lock-tables=false --no-tablespaces \
+                --set-gtid-purged=ON --triggers --routines --events \
+                2>/dev/null \
+                | gzip > "$BACKUP_DIR/db-${TIMESTAMP}.sql.gz"
+              echo "Backup complete: db-${TIMESTAMP}.sql.gz ($(du -h "$BACKUP_DIR/db-${TIMESTAMP}.sql.gz" | cut -f1))"
+              cd "$BACKUP_DIR"
+              ls -1t db-*.sql.gz | tail -n +$((BACKUP_RETENTION + 1)) | xargs -r rm -f
+              echo "Backups after rotation:"
+              ls -lht db-*.sql.gz

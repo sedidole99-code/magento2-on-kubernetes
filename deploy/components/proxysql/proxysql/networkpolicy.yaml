@@ -1,0 +1,88 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-proxysql
+spec:
+  podSelector:
+    matchLabels:
+      app: proxysql
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Magento data-plane traffic on the MySQL-protocol port.
+  - from:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: cron
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: install
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: consumer
+    - podSelector:
+        matchLabels:
+          app: backup
+          component: db
+    ports:
+    - protocol: TCP
+      port: 6033
+  # Cluster sync between ProxySQL pods + admin queries from the manual
+  # users-reload Job pod.
+  - from:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    - podSelector:
+        matchLabels:
+          app: proxysql-users-reload
+    ports:
+    - protocol: TCP
+      port: 6032
+  egress:
+  # ProxySQL -> primary on 3306 (writes + writer-pinned reads).
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # ProxySQL -> replicas on 3306 (read offload).
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db-replica
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Cluster sync between ProxySQL pods.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 6032
+  # DNS resolution.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
