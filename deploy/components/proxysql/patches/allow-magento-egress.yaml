@@ -1,0 +1,194 @@
+---
+# Re-route magento-web's database egress from db:3306 to proxysql:6033.
+#
+# Base allow-magento-web permits egress to `app: db` on 3306. After the db
+# Service selector is swapped to `app: proxysql` on targetPort 6033, the
+# Service VIP DNATs into a proxysql pod IP — and NetworkPolicies match on
+# the destination Pod IP, not the Service VIP. So the original `app: db`
+# rule no longer matches the actual destination, and traffic is silently
+# dropped. We replace the db rule with proxysql:6033.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-web
+spec:
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 6033
+  # Direct access to the primary, used by the `setup` init container which
+  # bypasses ProxySQL for setup:upgrade / app:config:import (see patches/
+  # magento-web-setup-db-host.yaml — DDL + LOCK TABLES + verification SELECTs
+  # in one connection trip ProxySQL 9006 if routed via hostgroup split).
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  - to:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 6081
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Same db -> proxysql swap for magento-cron.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-cron
+spec:
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 6033
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  - to:
+    - podSelector:
+        matchLabels:
+          app: magento
+          component: web
+    ports:
+    - protocol: TCP
+      port: 8080
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Same db -> proxysql swap for magento-install (one-shot setup Job).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-install
+spec:
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 6033
+  # Direct access to the primary, used by the `magento-setup` container
+  # for setup:install (see patches/install-job-db-host.yaml — same 9006
+  # avoidance reason as the magento-web setup init container).
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  - to:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 6081
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

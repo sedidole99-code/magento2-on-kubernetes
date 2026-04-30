@@ -52,8 +52,12 @@ kubectl -n production wait --for=condition=complete job/proxysql-users-reload-* 
 # 5. Verify ProxySQL backend pool
 kubectl exec proxysql-0 -- mysql -h127.0.0.1 -P6032 -uadmin -p"$ADMIN_PASSWORD" \
   -e "SELECT hostgroup_id, hostname, status FROM runtime_mysql_servers"
-# Expect: hg=0 db-primary ONLINE; hg=10 lists both db-replica-* AND db-primary
-# (mysql-monitor_writer_is_also_reader=1).
+# Expect: hg=0 db-primary ONLINE; hg=10 lists both db-replica-* ONLINE.
+# (mysql-monitor_writer_is_also_reader=1 affects the monitor module's lag
+# check semantics — it does NOT auto-populate mysql_servers with the writer
+# in the reader hostgroup. Lag-driven failover from hg=10 to hg=0 still
+# works via the SHUNNED_REPLICATION_LAG path: when both replicas exceed
+# max_replication_lag=30 simultaneously, ProxySQL falls back to the writer.)
 ```
 
 Until step 4 runs, Magento connections through ProxySQL fail with "ProxySQL Error: User 'magento' has no rules to access this hostgroup". This is by design — the bootstrap config ships a placeholder; the real password comes from `database-credentials` via the manual Job so it's never embedded in a ConfigMap.
@@ -67,7 +71,15 @@ kubectl exec deploy/some-pod -- mysql -h db-primary -uroot -p"$ROOT_PASS" \
   -e "SHOW MASTER STATUS\G"
 ```
 
-The `db-backup` CronJob is the only manifest auto-repointed (`-h db-primary`); everything else is human responsibility.
+Three manifests are auto-repointed at `db-primary` by the component:
+
+- `db-backup` CronJob — `mysqldump` needs deterministic GTID positions.
+- `magento-install` Job (the `magento-setup` container) — `setup:install` does DDL + `LOCK TABLES` + post-DDL verification SELECTs on the same connection.
+- `magento-web`'s `setup` init container — `setup:upgrade` and `app:config:import` have the same lock-then-SELECT pattern.
+
+For all three, routing through ProxySQL produces error 9006 ("connection is locked to hostgroup 0 but trying to reach hostgroup 10"): the DDL/`LOCK TABLES`/temp-table session pinning sticks the session to the writer, then a verification SELECT matches rule 50 and ProxySQL aborts instead of silently sticking. `transaction_persistent=1` only covers explicit `BEGIN`/`COMMIT`; it does not save lock-induced pinning. The fix is to bypass ProxySQL for schema work, which is what these patches do.
+
+Everything else (live `magento-web` traffic, `magento-cron`, `magento-consumer`, the `wait-for-db` init containers) keeps `DB_HOST=db` and goes through ProxySQL — that's where the read-split actually pays off.
 
 ## Read-after-write: rule-based pinning
 
@@ -114,6 +126,8 @@ ProxySQL Cluster sync propagates to the other pod within `cluster_check_interval
 | Symptom | Likely cause | Diagnostic |
 |---|---|---|
 | Magento can't connect via `db` | mysql_users table empty (first-deploy) | `kubectl create job --from=job/proxysql-users-reload-template ...` |
+| `9006 ProxySQL Error: connection is locked to hostgroup 0 but trying to reach hostgroup 10` during `setup:install`/`setup:upgrade` | An ad-hoc workload running schema work is pointed at `db` instead of `db-primary` | Confirm the failing workload is one of the three auto-repointed manifests — if it's something else (custom Job, manual `kubectl exec ...`), set `DB_HOST=db-primary` for that path. The component already patches `magento-install`, `magento-web`'s `setup` init container, and `db-backup`. |
+| Same 9006 from steady-state app traffic (not setup) | A digest hit rule 50 while the session was pinned by a write you don't have a rule for | `SELECT digest_text FROM stats_mysql_query_digest WHERE errors > 0` to find the table; add a `match_pattern` rule with an unused `rule_id` between 33 and 40 pinning it to `destination_hostgroup=0` |
 | All backends marked OFFLINE | Monitor password mismatch | Verify `monitor-credentials` Secret has same value as the user on `db-primary` (the bootstrap Job creates `monitor@%` from this Secret — they should match by construction) |
 | All hg=10 replicas SHUNNED_REPLICATION_LAG | One or both replicas stalled | `SHOW REPLICA STATUS\G` on each replica; `mysql-monitor_writer_is_also_reader=1` ensures reads still succeed (fall back to primary) |
 | Replica crash-loops after cluster delete | StatefulSet PVC retains an old data dir from before CLONE | Delete the PVC: `kubectl delete pvc data-db-replica-N` then restart the pod — bootstrap-replica.sh re-runs CLONE |

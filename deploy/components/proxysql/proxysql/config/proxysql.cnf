@@ -79,10 +79,10 @@ mysql_variables=
     commands_stats=true
     sessions_sort=true
     multiplexing=1
-    # Keep all reads inside an open transaction on the writer hostgroup, even
-    # if subsequent SELECTs would otherwise match a replica routing rule.
-    # Second line of defence behind the read-after-write rules below.
-    transaction_persistent=1
+    # NOTE: transaction_persistent is a per-user attribute on mysql_users
+    # (set on the magento user — see mysql_users block below and
+    # reconcile/users-reload-job.yaml). It is NOT a global mysql_variables
+    # setting; placing it here would be silently ignored.
 }
 
 # Replication topology: writer in hg=0, readers in hg=10. ProxySQL's monitor

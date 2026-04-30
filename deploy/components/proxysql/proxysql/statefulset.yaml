@@ -87,12 +87,16 @@ spec:
           mountPath: /config
       containers:
       - name: proxysql
-        image: proxysql/proxysql:2.7.1@sha256:f1da4d35e92a44eb19e3a8aaf18ada7c17fdfeebb33ff8e2bc6bf664a2716b89
+        image: proxysql/proxysql:2.7.1@sha256:cd866337812d98b9df83abeae9f51728f7cd5b1cdd97e788a1200452d9b7e075
         # Force ProxySQL to re-read /etc/proxysql.cnf on every start by
         # passing -D /var/lib/proxysql --initial. Without --initial, the
         # SQLite DB persisted from a prior boot wins and config changes are
         # ignored. We rely on the kustomize ConfigMap hash + Secret rotation
         # being reflected in admin variables on rollout.
+        # Image has no ENTRYPOINT (only Cmd starting with "proxysql"), so we
+        # set command: explicitly here — otherwise args become the exec target
+        # and Docker fails with "exec: -f: executable file not found".
+        command: ["proxysql"]
         args: ["-f", "-D", "/var/lib/proxysql", "--initial", "-c", "/etc/proxysql.cnf"]
         ports:
         - name: mysql

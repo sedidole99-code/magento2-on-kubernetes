@@ -60,6 +60,11 @@ spec:
             secretKeyRef:
               name: db-replica-credentials
               key: CLONE_PASSWORD
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: MYSQL_ROOT_PASSWORD
         volumeMounts:
         - mountPath: /var/lib/mysql
           name: data
@@ -87,7 +92,7 @@ spec:
           server_id = ${SERVER_ID}
           report_host = ${POD_NAME}.db-replica-headless
           EOF
-          exec docker-entrypoint.sh mysqld
+          exec /docker-entrypoint.sh mysqld
         env:
         - name: POD_NAME
           valueFrom:

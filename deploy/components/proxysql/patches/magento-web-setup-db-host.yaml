@@ -1,0 +1,49 @@
+# Repoint magento-web's `setup` init container at the primary directly.
+#
+# The `setup` init container runs `setup:db:status || setup:upgrade
+# --keep-generated` and `app:config:status || app:config:import`.
+# setup:upgrade performs DDL + LOCK TABLES + verification SELECTs on the
+# same connection — through ProxySQL the post-DDL verification SELECT
+# matches rule 50 (^SELECT -> hg=10) while the session is locked to hg=0
+# from the schema work, producing 9006 "connection is locked to hostgroup
+# 0 but trying to reach hostgroup 10".
+#
+# Bypass ProxySQL for setup paths only. The main `magento-web` container
+# is intentionally left on DB_HOST=db so live request traffic continues
+# to benefit from read splitting.
+#
+# Why this is a JSON 6902 patch and not strategic merge:
+# kustomize v5.x's strategic-merge of named lists (containers/initContainers)
+# does NOT reliably preserve order when the patch lists only a subset of
+# the entries — in our case the patched `setup` entry got moved to index 0,
+# which made it run before `wait-for-db`/`wait-for-elasticsearch` and crash
+# with CreateContainerConfigError-then-Exit-1 because the DB wasn't up yet.
+# A JSON 6902 `replace` on a specific path mutates in place and never
+# touches the surrounding list ordering.
+#
+# The `test` ops up front assert the indices we depend on. If a future
+# overlay/component adds another init container before `setup` or another
+# env entry before DB_HOST, this patch will fail with a clear error
+# ("test operation failed") instead of silently corrupting the manifest.
+# The expected layout, verified on a clean render of the production overlay
+# (which already includes wait-for-rabbitmq and wait-for-redis from earlier
+# patches):
+#
+#   initContainers[0] = wait-for-rabbitmq
+#   initContainers[1] = wait-for-redis
+#   initContainers[2] = wait-for-db
+#   initContainers[3] = wait-for-elasticsearch
+#   initContainers[4] = setup
+#     env[0] = DB_HOST       <-- this is what we replace
+#     env[1] = DB_NAME       (from secretKeyRef)
+#     env[2] = DB_USER       (from secretKeyRef)
+#     env[3] = DB_PASS       (from secretKeyRef)
+- op: test
+  path: /spec/template/spec/initContainers/4/name
+  value: setup
+- op: test
+  path: /spec/template/spec/initContainers/4/env/0/name
+  value: DB_HOST
+- op: replace
+  path: /spec/template/spec/initContainers/4/env/0/value
+  value: db-primary

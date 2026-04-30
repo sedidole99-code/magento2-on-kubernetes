@@ -28,22 +28,37 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: reload
-        image: proxysql/proxysql:2.7.1@sha256:f1da4d35e92a44eb19e3a8aaf18ada7c17fdfeebb33ff8e2bc6bf664a2716b89
+        image: proxysql/proxysql:2.7.1@sha256:cd866337812d98b9df83abeae9f51728f7cd5b1cdd97e788a1200452d9b7e075
         command: ["/bin/bash"]
         args:
         - -c
         - |
           set -euo pipefail
+          # On first-deploy this Job is applied alongside the proxysql STS, so
+          # proxysql-0.proxysql-admin may not have a DNS record yet. Wait up
+          # to ~5 min for the admin port to accept connections before giving
+          # up (Job backoffLimit takes over from there).
+          #
+          # Auth as `cluster`, NOT `admin`. ProxySQL restricts the `admin`
+          # account to local-only logins; remote TCP yields ERROR 1040 "User
+          # 'admin' can only connect locally". The `cluster` account is the
+          # same one ProxySQL pods use for cluster sync and is TCP-allowed.
+          for i in $(seq 1 60); do
+            if mysql -h proxysql-0.proxysql-admin -P 6032 \
+                     -u cluster -p"$CLUSTER_PASSWORD" --connect-timeout=3 \
+                     -e 'SELECT 1' >/dev/null 2>&1; then
+              echo "proxysql-0 admin reachable after ${i} attempt(s)"
+              break
+            fi
+            echo "waiting for proxysql-0.proxysql-admin:6032 (${i}/60)"
+            sleep 5
+          done
+          # ProxySQL's admin DB is SQLite — use INSERT OR REPLACE, not the
+          # MySQL-only ON DUPLICATE KEY UPDATE which fails with a syntax error.
           mysql -h proxysql-0.proxysql-admin -P 6032 \
-                -u admin -p"$ADMIN_PASSWORD" --batch <<SQL
-          INSERT INTO mysql_users(username, password, default_hostgroup, active, transaction_persistent, max_connections)
-            VALUES('$DB_USER', '$DB_PASS', 0, 1, 1, 1000)
-            ON DUPLICATE KEY UPDATE
-              password = VALUES(password),
-              default_hostgroup = VALUES(default_hostgroup),
-              active = VALUES(active),
-              transaction_persistent = VALUES(transaction_persistent),
-              max_connections = VALUES(max_connections);
+                -u cluster -p"$CLUSTER_PASSWORD" --batch <<SQL
+          INSERT OR REPLACE INTO mysql_users(username, password, default_hostgroup, active, transaction_persistent, max_connections)
+            VALUES('$DB_USER', '$DB_PASS', 0, 1, 1, 1000);
           LOAD MYSQL USERS TO RUNTIME;
           SAVE MYSQL USERS TO DISK;
           SELECT 'mysql_users after reload:' AS info;
@@ -51,11 +66,11 @@ spec:
           SQL
           echo "Cluster sync will propagate to proxysql-1 within cluster_check_interval_ms=200ms"
         env:
-        - name: ADMIN_PASSWORD
+        - name: CLUSTER_PASSWORD
           valueFrom:
             secretKeyRef:
               name: proxysql-credentials
-              key: ADMIN_PASSWORD
+              key: CLUSTER_PASSWORD
         - name: DB_USER
           valueFrom:
             secretKeyRef:

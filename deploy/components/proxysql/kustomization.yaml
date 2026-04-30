@@ -85,3 +85,18 @@ patches:
   target:
     kind: NetworkPolicy
     name: allow-db-backup
+- path: patches/allow-magento-egress.yaml
+# Schema-migration paths bypass ProxySQL — DDL + LOCK TABLES + post-DDL
+# verification SELECTs in the same connection trip ProxySQL error 9006
+# ("connection is locked to hostgroup 0 but trying to reach hostgroup 10")
+# because the session is pinned to the writer while rule 50 wants hg=10.
+# The main magento-web container is intentionally NOT patched — live
+# traffic keeps DB_HOST=db so it continues to get read splitting.
+- path: patches/install-job-db-host.yaml
+  target:
+    kind: Job
+    name: magento-install
+- path: patches/magento-web-setup-db-host.yaml
+  target:
+    kind: Deployment
+    name: magento-web

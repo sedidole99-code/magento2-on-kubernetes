@@ -1,0 +1,29 @@
+---
+# Repoint the magento-install Job's setup container at the primary directly.
+#
+# After the proxysql component is enabled, `db.<ns>` resolves to ProxySQL
+# (read/write split). `setup:install` performs DDL + LOCK TABLES + post-DDL
+# verification SELECTs on the same connection — once a CREATE TABLE / LOCK
+# pins the session to hg=0 (writer), a subsequent SELECT matches rule 50
+# and ProxySQL emits 9006 ("connection is locked to hostgroup 0 but trying
+# to reach hostgroup 10") instead of silently sticking. transaction_persistent
+# only covers explicit BEGIN/COMMIT — it does not cover the lock-induced
+# session pinning that DDL/LOCK/temp-tables/prepared-statements produce.
+#
+# Bypass ProxySQL for schema-migration paths by sending DB_HOST at the
+# primary directly. Same model as patches/db-backup-cronjob.yaml.
+#
+# Strategic merge: the env list is patched by name (DB_HOST), leaving the
+# rest of the env entries (DB_NAME/DB_USER/DB_PASS from secrets) untouched.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: magento-install
+spec:
+  template:
+    spec:
+      containers:
+      - name: magento-setup
+        env:
+        - name: DB_HOST
+          value: db-primary
