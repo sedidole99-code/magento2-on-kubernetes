@@ -220,6 +220,12 @@ build: check-tools check-composer-auth
 define kustomize_apply
 	cp $(1)/kustomization.yaml $(1)/kustomization.yaml.bak
 	cd $(1) && $(KUSTOMIZE) edit set image $(IMAGE_REPO)=$(IMAGE_REPO):$(IMAGE_TAG)
+	@# Job specs are immutable. If a previous step-N-deploy left a Failed (or
+	@# completed-and-not-yet-TTL'd) magento-install Job behind, kubectl apply
+	@# would error with "Job is immutable" before getting to anything else.
+	@# Delete it so the apply can recreate it cleanly. The deploy.sh-driven
+	@# `make deploy` path already does the equivalent via deploy-envs/.
+	@$(KUBECTL) delete job magento-install $(NS_FLAG) --ignore-not-found --wait=true 2>/dev/null || true
 	$(KUSTOMIZE) build $(CURDIR)/$(1) | $(KUBECTL) apply $(NS_FLAG) -f - || \
 		{ mv -f $(1)/kustomization.yaml.bak $(1)/kustomization.yaml; exit 1; }
 	mv -f $(1)/kustomization.yaml.bak $(1)/kustomization.yaml

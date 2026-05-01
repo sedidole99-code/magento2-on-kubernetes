@@ -163,3 +163,34 @@ To revert to single-primary topology:
 3. The `db-primary` Service, `db-replica` StatefulSet, ProxySQL StatefulSet, and bootstrap Job are pruned by `kubectl apply --prune` (or manually deleted).
 4. The primary's binlogs and GTID stay enabled — they're harmless extras. To revert `my.cnf` cleanly, the next deploy will pick up the base `my.cnf` again (since the component's `behavior: replace` is no longer active) and the ConfigMap hash flip will roll the primary one more time.
 5. The `database-credentials` Secret is unaffected; Magento pods continue to use it directly against the primary.
+
+## Do you actually need ProxySQL?
+
+Worth asking before going live. ProxySQL earns its keep when:
+
+- PHP-FPM connection saturation has been a real problem (the multiplexer is the main win).
+- Read load exceeds what a single beefy primary can serve, even after Varnish + Redis FPC are tuned (the read split is the second win).
+- You want lag-aware routing or to add/remove replicas without the app caring (the operational win).
+
+If your current load comfortably fits in one Percona node and Varnish+Redis hit rates are healthy (>90% FPC, >95% Varnish on cacheable paths), introducing ProxySQL adds an admin surface, a SQLite admin DB, ProxySQL Cluster sync semantics, and a query-rule tuning chore — all of which are real ongoing costs. Plain Magento → primary, with `make monitoring` watching DB CPU and connections, is one fewer thing to operate.
+
+The component is opt-in for this reason. Turning it on is a real choice; default-off keeps the simple case simple.
+
+## Before going live (downstream-deployer checklist)
+
+This repo ships a working *local-cluster* template. The defaults here are sized for development and low-stakes staging; production traffic on a real cluster needs the deployer to add several things that are intentionally out of scope for this repo:
+
+| Concern | Default here | What real production needs |
+|---|---|---|
+| Primary PVC | 10 GiB | 50–100 GiB (binlogs at `binlog_expire_logs_seconds=604800` can eat multi-GiB/day). Bump in `deploy/overlays/production/patches/database.yaml`. |
+| Replica PVCs | 10 GiB each | Match the primary's data-volume size budget — replicas hold the full dataset. |
+| Backup destination | Single `backup` PVC inside the cluster | Offsite copy (S3 / Azure Blob / GCS) with KMS-at-rest, lifecycle/retention rules, and a *tested* restore drill. The cluster losing the backup PVC is otherwise total data loss. |
+| Restore RTO | Untested | Run `make restore-db` against a non-prod namespace, place a test order, time it. Document the runbook. Repeat quarterly. |
+| Primary failover | Manual (no controller) | Either accept manual failover with a written runbook + SLA window, or add MySQL InnoDB Cluster (Group Replication + Router) / `orchestrator` / a similar controller. **Choose explicitly — not choosing is the actual bug.** |
+| Alerting | None on DB layer | Prometheus rules on `Seconds_Behind_Source`, `runtime_mysql_servers.status`, `stats_mysql_connection_pool.ConnUsed/ConnFree`, PVC fill ratio (`kubelet_volume_stats_used_bytes / capacity_bytes`). The kube-prometheus-stack from `make monitoring` is already wired for magento-web — extend with a ServiceMonitor for ProxySQL's stats interface. |
+| Load test | None | k6/Locust against the cluster at expected peak × 1.5 for 30+ minutes, watching ProxySQL stats and replica lag throughout. Without numbers, "production ready" is a guess. |
+| Multi-AZ | Single-zone (whatever your cluster is) | Spread primary, replicas, and ProxySQL pods across availability zones via topology-spread constraints or per-zone node pools. Async replication doesn't help against a single-zone outage if everything is in that zone. |
+| TLS in-cluster | Plain TCP | Enable TLS on Percona + ProxySQL if your threat model includes node compromise or compliance requires encryption-in-transit on the cluster network. |
+| Query-rule tuning | Rules 30–33 cover quote/sales/checkout/customer | Real Magento (especially with extensions) will surface read-after-write digests these rules don't catch. Schedule a recurring weekly review:`SELECT hostgroup, count_star, errors, substr(digest_text,1,80) FROM stats_mysql_query_digest WHERE errors > 0 OR (hostgroup = 0 AND digest_text LIKE 'SELECT%') ORDER BY count_star DESC LIMIT 50` Anything on hg=0 that isn't a write/transaction-locked is a candidate to move to hg=10; anything with `errors > 0` is a 9006 you haven't pinned yet. |
+| `mysql_users` rotation | Manual (`proxysql-users-reload-template` Job) | Wire the reload to your secret-rotation pipeline so a `database-credentials` change automatically triggers the Job. Otherwise a forgotten reload silently breaks frontend connections. |
+| Destroy cleanup | StringSecret CRs are deleted; the underlying Secrets are GC'd via owner-ref, but if the operator's GC fails they linger | After `make destroy`, verify `kubectl -n <env> get secret proxysql-credentials database-credentials monitor-credentials db-replica-credentials` returns NotFound. If any linger, delete manually before re-deploying — otherwise the new StringSecret reuses the old random password and ProxySQL's `mysql_users` row drifts out of sync with the primary. |
