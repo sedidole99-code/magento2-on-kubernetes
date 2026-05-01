@@ -55,6 +55,11 @@ endif
 $(filter $(ENVS),$(MAKECMDGOALS)):
 	@true
 
+# 'all' is a multi-env shortcut understood by deploy-status. Swallow it the
+# same way so `make deploy-status all` doesn't fail trying to build it.
+$(filter all,$(MAKECMDGOALS)):
+	@true
+
 # --------------------------------------------------------------------------- #
 # Pre-flight checks
 # --------------------------------------------------------------------------- #
@@ -342,6 +347,31 @@ deploy-maintenance: check-env ensure-namespace
 deploy-only: check-env ensure-namespace
 	KUSTOMIZE="$(KUSTOMIZE)" KUBECTL="$(KUBECTL)" IMAGE_REPO="$(IMAGE_REPO)" IMAGE_TAG="$(IMAGE_TAG)" ENV="$(ENV)" NAMESPACE="$(NAMESPACE)" NS_FLAG="$(NS_FLAG)" ENV_KUSTOMIZE_PATH="$(ENV_KUSTOMIZE_PATH)" ./deploy/deploy.sh --skip-build
 
+# `all` is detected directly from MAKECMDGOALS so it doesn't go through the
+# ENV→NAMESPACE resolution (which would error on the unknown env). Single-env
+# invocations rely on the resolved $(NAMESPACE).
+#   make deploy-status <env>      one-shot status report
+#   make deploy-watch  <env>      same script in watch mode (auto-refresh,
+#                                 auto-exit on HEALTHY); FORCE_COLOR keeps
+#                                 ANSI on so colors render under any wrapper.
+deploy-status:
+	@if [ -n "$(filter all,$(MAKECMDGOALS))" ]; then \
+		KUBECTL="$(KUBECTL)" bash ./deploy/deploy-status.sh all ; \
+	elif [ -n "$(NAMESPACE)" ]; then \
+		KUBECTL="$(KUBECTL)" bash ./deploy/deploy-status.sh "$(NAMESPACE)" ; \
+	else \
+		echo "Usage: make deploy-status <dev|stage|prod|all>" >&2 ; exit 64 ; \
+	fi
+
+deploy-watch:
+	@if [ -n "$(filter all,$(MAKECMDGOALS))" ]; then \
+		FORCE_COLOR=1 KUBECTL="$(KUBECTL)" bash ./deploy/deploy-status.sh all --watch ; \
+	elif [ -n "$(NAMESPACE)" ]; then \
+		FORCE_COLOR=1 KUBECTL="$(KUBECTL)" bash ./deploy/deploy-status.sh "$(NAMESPACE)" --watch ; \
+	else \
+		echo "Usage: make deploy-watch <dev|stage|prod|all>" >&2 ; exit 64 ; \
+	fi
+
 # --------------------------------------------------------------------------- #
 # Backup & Restore
 # --------------------------------------------------------------------------- #
@@ -512,4 +542,4 @@ destroy-everything:
 	@$(KUBECTL) delete namespace staging production --ignore-not-found --wait=false 2>/dev/null || true
 	@echo "All environments and resources destroyed."
 
-.PHONY: check-tools check-composer-auth check-env minikube cluster-dependencies ensure-namespace default dev develop stage staging stag production prod monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-1-deploy step-2 step-2-deploy step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all destroy-everything services services-server
+.PHONY: check-tools check-composer-auth check-env minikube cluster-dependencies ensure-namespace default dev develop stage staging stag production prod monitoring logging-loki monitoring-loki-datasource monitoring-kibana build step-1 step-1-deploy step-2 step-2-deploy step-3 step-3-deploy step-4 step-4-deploy deploy deploy-zero deploy-maintenance deploy-only deploy-status deploy-watch backup backup-db backup-media backup-list restore-db restore-media destroy destroy-monitoring destroy-services destroy-cluster destroy-all destroy-everything services services-server
