@@ -60,6 +60,9 @@ make deploy dev                  # Auto-detect zero-downtime vs maintenance mode
 make deploy-zero dev             # Force rolling update
 make deploy-maintenance dev      # Force maintenance mode (scales down, upgrades, scales up)
 make deploy-only dev             # Deploy existing image (skip build)
+make deploy-status dev           # One-shot deploy classifier (HEALTHY/IN PROGRESS/FAILED/NOT DEPLOYED)
+make deploy-status all           # Worst-of-three across dev/staging/production (CI-gate-friendly)
+make deploy-watch dev            # Auto-refreshing variant; exits after 3 consecutive HEALTHY ticks
 ```
 
 ### Monitoring & Logging

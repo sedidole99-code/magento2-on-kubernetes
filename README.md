@@ -101,6 +101,8 @@ Auto-detects zero-downtime vs maintenance-mode based on `setup:db:status` and `a
 | `make deploy-zero` | Force zero-downtime rolling update |
 | `make deploy-maintenance` | Force maintenance-mode (scale down, upgrade, scale up) |
 | `make deploy-only` | Deploy without building (uses existing image) |
+| `make deploy-status` | One-shot HEALTHY / IN PROGRESS / FAILED / NOT DEPLOYED classifier (exit 0/1/2/3); accepts `<env>` or `all` |
+| `make deploy-watch` | Auto-refreshing variant of `deploy-status`; exits after 3 consecutive HEALTHY ticks |
 
 ### Monitoring & Logging
 
@@ -303,8 +305,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 ### Medium priority (scalability & architecture)
 
 - [ ] **imgproxy for on-the-fly image optimization** — deploy [imgproxy](https://imgproxy.net/) as a standalone service that resizes, reformats, and optimizes Magento product/CMS images at request time instead of pre-generating every variant at catalog save. Magento's `pub/media/catalog/product/cache/` balloons to tens of thousands of files per product (every size × every theme), inflating the media PVC and coupling cache regeneration to deploys. imgproxy generates variants in memory on demand, supports modern formats (WebP, AVIF) via `Accept`-header content negotiation, and reads directly from PVC or S3. Land as a new `deploy/bases/imgproxy/` (Deployment + Service + NetworkPolicy + HPA) plus an opt-in `deploy/components/imgproxy/` toggle that rewires Nginx to route `/media/catalog/product/...` through it. Use signed URLs (`IMGPROXY_KEY` + `IMGPROXY_SALT` from a generated Secret) to prevent arbitrary-URL abuse. Pairs naturally with the S3 media TODO — imgproxy reads from S3 natively, eliminating the shared-PVC dependency.
-
-- [x] **Database read replicas** — landed as `deploy/components/proxysql/` (opt-in component, on by default in `deploy/overlays/production`). 2 async-GTID Percona 8.0 replicas bootstrapped via the MySQL 8.0 CLONE plugin + 2 ProxySQL pods in cluster mode doing read/write split with connection multiplexing. Magento keeps `DB_HOST=db` unchanged — the `db` Service is patched to point at ProxySQL transparently; a new `db-primary` Service preserves direct primary access for `mysqldump` and ad-hoc operator queries. Read-after-write hot tables pinned to writer via `mysql_query_rules`; lag-aware routing falls back to primary if all replicas exceed `max_replication_lag=30`. See `deploy/components/proxysql/README.md` for opt-in steps, query-rule tuning, and credential rotation. **First-time apply must run as `make deploy-maintenance prod`** to avoid mixed-routing during the primary's binlog-enabling restart.
 
 - [-] **OpenSearch migration** — replace Elasticsearch 7.17 (EOL, last patch Dec 2024) with OpenSearch 2.x. Magento 2.4.6+ supports OpenSearch natively via `CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch`. Avoids Elastic licensing restrictions (SSPL), gets active security patches, and is a drop-in replacement. Requires updating the base StatefulSet image, `common.env` search engine config, and health check endpoint.
 
