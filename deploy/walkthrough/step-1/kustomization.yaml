@@ -6,4 +6,7 @@ metadata:
 resources:
 - ../../bases/app
 - ../../bases/database
-- ../../bases/elasticsearch
+# Search backend. Exactly one of the two lines below must be active.
+# See README "Search engine: OpenSearch / Elasticsearch toggle" for the full procedure.
+- ../../bases/opensearch
+# - ../../bases/elasticsearch

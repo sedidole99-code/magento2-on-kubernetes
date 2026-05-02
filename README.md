@@ -288,6 +288,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **Varnish VCL** | Basic FPC + grace + ESI | Above + saint-mode equivalent (`return (abandon)` on 5xx background fetches so transient origin errors don't replace the cached object), bot-aware caching (17 UA patterns — Googlebot/Bingbot/AI scrapers/social previews/SEO crawlers normalized to logged-out, cookie-less requests so crawlers can't pollute the session-variant cache), and a 5s pass on origin 5xx instead of the generic 120s Hit-For-Pass. `X-Magento-Tags-Pattern` BAN PURGE on the admin port and ESI on text responses were already in place. |
 | **Kustomize components** | None | `deploy/components/resource-limits-added/` — single-file toggle that re-applies the cpu-limit additions on `db` + `rabbitmq` + `varnish`. Comment its `patches:` block to revert those three containers to the pre-initiative state without touching base manifests. |
 | **Database topology** | Single Percona 8.0 primary | `deploy/components/proxysql/` (opt-in; on by default in `deploy/overlays/production`) — adds 2 async-GTID Percona 8.0 replicas (bootstrapped via the MySQL 8.0 CLONE plugin) + 2 ProxySQL pods in cluster mode for read/write split with connection multiplexing. Magento keeps a single connection string — the existing `db` Service is patched to point at ProxySQL on 6033 transparently; new `db-primary` Service preserves direct primary access for `mysqldump` and operator queries. Read-after-write hot tables (`quote*`, `sales_*`, `checkout_*`, `customer_(entity\|address_entity\|grid_flat)`) pinned to writer via `mysql_query_rules`. Lag-aware routing with `writer_is_also_reader=1` falls back to primary if all replicas exceed `max_replication_lag=30`. |
+| **Search engine** | Elasticsearch 7.17 (EOL, SSPL-licensed) | OpenSearch 2.19.5 (Apache-2.0, active security patches). Drop-in replacement via Magento 2.4.6+'s native `opensearch` driver. `deploy/bases/elasticsearch/` retained as a comment-swap fallback — see "Search engine toggle" below. |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
 | **Makefile** | 4 targets | 30+ targets with env support, install log streaming |
 | **README** | Minimal | Full docs, troubleshooting, production guide |
@@ -306,8 +307,6 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **imgproxy for on-the-fly image optimization** — deploy [imgproxy](https://imgproxy.net/) as a standalone service that resizes, reformats, and optimizes Magento product/CMS images at request time instead of pre-generating every variant at catalog save. Magento's `pub/media/catalog/product/cache/` balloons to tens of thousands of files per product (every size × every theme), inflating the media PVC and coupling cache regeneration to deploys. imgproxy generates variants in memory on demand, supports modern formats (WebP, AVIF) via `Accept`-header content negotiation, and reads directly from PVC or S3. Land as a new `deploy/bases/imgproxy/` (Deployment + Service + NetworkPolicy + HPA) plus an opt-in `deploy/components/imgproxy/` toggle that rewires Nginx to route `/media/catalog/product/...` through it. Use signed URLs (`IMGPROXY_KEY` + `IMGPROXY_SALT` from a generated Secret) to prevent arbitrary-URL abuse. Pairs naturally with the S3 media TODO — imgproxy reads from S3 natively, eliminating the shared-PVC dependency.
 
-- [ ] **OpenSearch migration** — replace Elasticsearch 7.17 (EOL, last patch Dec 2024) with OpenSearch 2.x. Magento 2.4.6+ supports OpenSearch natively via `CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch`. Avoids Elastic licensing restrictions (SSPL), gets active security patches, and is a drop-in replacement. Requires updating the base StatefulSet image, `common.env` search engine config, and health check endpoint.
-
 - [-] **Media storage on S3** — use Magento's built-in remote storage module (`--remote-storage-driver=aws-s3`) to store `pub/media` on S3/MinIO instead of a shared PVC. The current `ReadWriteOnce` PVC can only be mounted on one node, which blocks multi-zone deployments and makes horizontal scaling of magento-web fragile. S3 also eliminates the need for media backup CronJobs and enables CDN integration.
 
 - [-] **Horizontal scaling for Varnish** — currently a single Varnish pod is a single point of failure for all cached traffic. Add an HPA and configure VCL for multi-instance caching (consistent hashing or shared storage). Consider using the Varnish `shard` director to distribute cache across pods.
@@ -325,6 +324,42 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 - [-] **Graceful shutdown / preStop hooks** — add `preStop` lifecycle hooks to drain connections before pod termination. Magento web pods should finish in-flight PHP requests (`sleep 5` or SIGTERM handling), Varnish should drain its connection pool, and RabbitMQ should stop accepting new messages. Prevents 502 errors during rolling updates.
 
 - [~] **Resource quotas per namespace** — ready on branch [`resource-governance`](../../tree/resource-governance), pending verification before merge. Adds `ResourceQuota` + two `LimitRange`s (container `defaultRequest`/`default` + PVC 1–20Gi bounds) from `deploy/bases/quota/`, wired only into staging and production overlays; dev/kind/test stay unconstrained. Per-env `hard` caps are sized for the local minikube profile (`--cpus=4 --memory=16g`): staging requests cap 4 CPU / 12Gi (limits 10 CPU / 20Gi), production requests cap 6 CPU / 18Gi (limits 14 CPU / 28Gi), with object caps for pods/services/configmaps/secrets/PVCs + 30Gi storage. Running on a real staging/production cluster requires bumping these `hard` values. The branch also commits explicit `resources:` on every init container and the install Job so the quota can be enforced without breaking admission.
+
+## Search engine toggle
+
+OpenSearch 2.19.5 is the default. To revert to Elasticsearch 7.17, make three comment swaps:
+
+**1. `deploy/walkthrough/step-1/kustomization.yaml`** — comment out `../../bases/opensearch`, uncomment `../../bases/elasticsearch`.
+
+**2. `deploy/bases/app/config/common.env`** — comment out the OpenSearch trio, uncomment the Elasticsearch trio:
+```
+# CONFIG__DEFAULT__CATALOG__SEARCH__OPENSEARCH_SERVER_HOSTNAME=opensearch
+# CONFIG__DEFAULT__CATALOG__SEARCH__OPENSEARCH_SERVER_PORT=9200
+# CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch
+CONFIG__DEFAULT__CATALOG__SEARCH__ELASTICSEARCH7_SERVER_HOSTNAME=elasticsearch
+CONFIG__DEFAULT__CATALOG__SEARCH__ELASTICSEARCH7_SERVER_PORT=9200
+CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=elasticsearch7
+```
+
+**3. `deploy/bases/app/magento-web.yaml` and `deploy/bases/app/jobs/install.yaml`** — in the `wait-for-search` init container's `args`, change the interpolated variable names from `OPENSEARCH_SERVER_HOSTNAME`/`OPENSEARCH_SERVER_PORT` back to `ELASTICSEARCH7_SERVER_HOSTNAME`/`ELASTICSEARCH7_SERVER_PORT`.
+
+NetworkPolicies, `deploy-status.sh`, and the services dashboard all detect both engines dynamically — no changes needed for those.
+
+**Existing-data caveat:** on a cluster that already ran one engine, `app:config:import` will not overwrite `core_config_data` rows that already have a value. After switching engines, run once:
+```bash
+# Switching to OpenSearch:
+php bin/magento config:set catalog/search/engine opensearch
+php bin/magento config:set catalog/search/opensearch_server_hostname opensearch
+php bin/magento config:set catalog/search/opensearch_server_port 9200
+php bin/magento indexer:reindex catalogsearch_fulltext
+
+# Switching back to Elasticsearch:
+php bin/magento config:set catalog/search/engine elasticsearch7
+php bin/magento config:set catalog/search/elasticsearch7_server_hostname elasticsearch
+php bin/magento config:set catalog/search/elasticsearch7_server_port 9200
+php bin/magento indexer:reindex catalogsearch_fulltext
+```
+Or destroy and redeploy (`make destroy <env>` + `make step-4-deploy <env>`) to start fresh.
 
 ## Contributing
 

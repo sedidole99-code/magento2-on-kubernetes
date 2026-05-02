@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  labels:
+    app: opensearch
+spec:
+  selector:
+    app: opensearch
+  ports:
+  - name: opensearch
+    port: 9200
+    protocol: TCP
+    targetPort: 9200
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+spec:
+  selector:
+    matchLabels:
+      app: opensearch
+  serviceName: opensearch
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      initContainers:
+      - name: set-volume-ownership
+        image: busybox@sha256:f9a104fddb33220ec80fc45a4e606c74aadf1ef7a3832eb0b05be9e90cd61f5f
+        command:
+        - /bin/sh
+        args:
+        - -c
+        - chown -R 1000:1000 /usr/share/opensearch/data
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/data
+          name: data
+          subPath: data
+      containers:
+      - name: opensearch
+        image: opensearchproject/opensearch:2.19.5@sha256:6aa4ac41d7f611194b316eed5e95e587440acbc624aedf31b85c85128e5234fe
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: OPENSEARCH_JAVA_OPTS
+          value: -Xms512m -Xmx512m
+        - name: discovery.seed_hosts
+          value: opensearch-0.opensearch
+        - name: cluster.initial_cluster_manager_nodes
+          value: opensearch-0
+        - name: DISABLE_SECURITY_PLUGIN
+          value: "true"
+        - name: plugins.security.disabled
+          value: "true"
+        readinessProbe:
+          httpGet:
+            path: /_cluster/health?local=true
+            port: 9200
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /_cluster/health?local=true
+            port: 9200
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/data
+          name: data
+          subPath: data
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 250m
+          limits:
+            memory: 2Gi
+            cpu: 500m
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi

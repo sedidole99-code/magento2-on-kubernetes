@@ -109,8 +109,10 @@ Tests live in `test/e2e/` using Cypress + Cucumber. The single test scenario run
 
 ```
 deploy/
-├── bases/           # 10 independent components (app, database, elasticsearch, redis,
-│                    #   rabbitmq, varnish, backup, consumer, monitoring, services)
+├── bases/           # 11 independent components (app, database, elasticsearch, opensearch,
+│                    #   redis, rabbitmq, varnish, backup, consumer, monitoring, services)
+│                    #   (`elasticsearch` and `opensearch` are a toggle pair — exactly one
+│                    #   is referenced from `step-1/kustomization.yaml` at a time)
 ├── components/      # Kustomize Components (mix-ins). resource-limits-added toggles
 │                    #   the cpu-limit additions on db/rabbitmq/varnish.
 ├── walkthrough/     # Progressive steps: step-1 → step-2 → step-3 → step-4
@@ -130,7 +132,7 @@ The `redis` base ships **three separate StatefulSets** — `redis-cache` (defaul
 ### Container Architecture
 
 The `magento-web` pod runs 3 containers + 3 init containers:
-- **Init:** `wait-for-db` (netcat), `wait-for-elasticsearch` (curl), `setup` (runs `setup:upgrade`/`app:config:import` if needed)
+- **Init:** `wait-for-db` (netcat), `wait-for-search` (curl — polls the active search backend; OpenSearch by default, ES if toggled), `setup` (runs `setup:upgrade`/`app:config:import` if needed)
 - **Main:** `magento-web` (Nginx + PHP-FPM via supervisord), `php-metrics-exporter`, `nginx-metrics-exporter`
 
 The `magento-consumer` pod (step-4+, **opt-in**) runs 1 container + 2 init containers:
@@ -171,11 +173,26 @@ Environment variables flow through layers (later overrides earlier):
 3. ConfigMap `additional` (step-specific: Redis, Varnish, AMQP — merged per step)
 4. Secret `magento-admin` (admin credentials)
 
-At runtime, `src/app/etc/env.docker.php` reads env vars via `getenv()` to build Magento's config array. Magento's `CONFIG__DEFAULT__*` pattern sets admin-locked values from env vars. `CRON_CONSUMERS_RUNNER` is tri-state: `true` (step-4 default) populates `cron_consumers_runner` with `cron_run=true`, `max_messages=$CRON_CONSUMERS_MAX_MESSAGES`, and `consumers=explode(',', $CRON_CONSUMERS_LIST)` so `magento-cron` spawns a curated subset; `false` writes an explicit disabled block and leaves spawning to the dedicated `magento-consumer` Deployment; unset leaves Magento's own default. `CONSUMERS_WAIT_FOR_MESSAGES=0` sets `queue.consumers_wait_for_messages` so any `queue:consumers:start` process — cron-spawned or Deployment-spawned — exits on an empty queue instead of polling indefinitely.
+At runtime, `src/app/etc/env.docker.php` reads env vars via `getenv()` to build Magento's config array. Magento's `CONFIG__DEFAULT__*` pattern sets admin-locked values from env vars. Search-engine config flows through `CONFIG__DEFAULT__CATALOG__SEARCH__OPENSEARCH_SERVER_*` / `ENGINE=opensearch` env vars via `app:config:import` (writes to `app/etc/config.php`, not `env.php`); `src/app/etc/env.docker.php` does not carry search config. `CRON_CONSUMERS_RUNNER` is tri-state: `true` (step-4 default) populates `cron_consumers_runner` with `cron_run=true`, `max_messages=$CRON_CONSUMERS_MAX_MESSAGES`, and `consumers=explode(',', $CRON_CONSUMERS_LIST)` so `magento-cron` spawns a curated subset; `false` writes an explicit disabled block and leaves spawning to the dedicated `magento-consumer` Deployment; unset leaves Magento's own default. `CONSUMERS_WAIT_FOR_MESSAGES=0` sets `queue.consumers_wait_for_messages` so any `queue:consumers:start` process — cron-spawned or Deployment-spawned — exits on an empty queue instead of polling indefinitely.
 
 ### Database read replicas (opt-in via `deploy/components/proxysql/`)
 
 Off by default; **on in `deploy/overlays/production`**. Enabling the component adds three things atomically: a 2-replica MySQL async-GTID replica StatefulSet (`db-replica`), a 2-replica ProxySQL Cluster StatefulSet (`proxysql`) doing read/write split, and a Service swap. The `db` Service's selector is patched to `app: proxysql` with `targetPort: 6033` — Magento's existing `DB_HOST=db` env var transparently routes through ProxySQL with no application-side changes. A new `db-primary` Service (selector `app: db`, port 3306) is added for primary-only work; the `db-backup` CronJob is auto-repointed at it because `mysqldump --master-data=2` needs deterministic GTID positions. **Operator-habit gotcha**: `db.<ns>` no longer resolves to the primary — runbooks doing `kubectl exec ... -- mysql -h db ...` for `SHOW MASTER STATUS` etc. must switch to `db-primary.<ns>`. **Schema-migration paths bypass ProxySQL by construction**: the component patches `Job/magento-install`'s `magento-setup` container and `Deployment/magento-web`'s `setup` init container to `DB_HOST=db-primary`, because `setup:install`/`setup:upgrade` mix DDL + `LOCK TABLES` + post-DDL verification SELECTs on the same connection — through ProxySQL the verification SELECT matches rule 50 (→ hg=10) while the session is locked to hg=0 by the DDL, raising error 9006. `transaction_persistent=1` doesn't cover this (it only handles explicit `BEGIN`/`COMMIT`, not lock-induced session pinning). The web pod's *main* container intentionally stays on `DB_HOST=db` so live traffic still gets read splitting; only the migration paths (install Job, setup init container, db-backup CronJob) are repointed. Replicas are bootstrapped via the MySQL 8.0 CLONE plugin (donor user `clone_user@%` granted `BACKUP_ADMIN`, set up by the one-shot `db-primary-bootstrap` Job that also creates `replica_user` and `monitor`); the bootstrap deliberately omits `INSTALL PLUGIN clone` because `plugin_load_add = mysql_clone.so` in the patched `mycnf` ConfigMap loads it on every start. Read-after-write is handled by `mysql_query_rules` 30–33 pinning SELECTs against `quote*`/`sales_*`/`checkout_*`/`customer_(entity|address_entity|grid_flat)` to hostgroup 0, plus `transaction_persistent=1` and `mysql-monitor_writer_is_also_reader=1` (so reads degrade to primary if all replicas exceed `max_replication_lag=30` simultaneously). Magento's `mysql_users` row in ProxySQL is populated by a manual `proxysql-users-reload-template` Job (run on first deploy and after `database-credentials` rotation) — until that Job runs, frontend connections error with "User has no rules to access this hostgroup". **Cut-over deploy must run as `make deploy-maintenance prod`**: `deploy.sh`'s `setup:db:status` / `app:config:status` checks both return 0 (Service swaps and `my.cnf` deltas don't affect schema status), so it would pick zero-downtime by default and produce a 2–10 min mixed-routing window where some PHP-FPM workers still hold direct-MySQL connections. **Binlog disk caveat**: enabling `log_bin` on the primary writes binlogs to its 10 GiB PVC; `binlog_expire_logs_seconds=604800` keeps 7 days, which can be multi-GiB/day under heavy writes — raise the primary PVC to 20–50 GiB in `deploy/overlays/production/patches/database.yaml` before binlogs ever fill the volume. Component composes cleanly with `resource-limits-added` (the only other Component) — both are `kind: Component` and stack via the same `components:` field. See `deploy/components/proxysql/README.md` for opt-in steps, query-rule tuning from `stats_mysql_query_digest`, the manual reconcile command, and rotation procedure.
+
+### Search engine (toggle between `deploy/bases/opensearch/` and `deploy/bases/elasticsearch/`)
+
+Default: **OpenSearch 2.19.5** (`opensearchproject/opensearch:2.19.5`), pod label `app: opensearch`, Service `opensearch:9200`. Fallback: Elasticsearch 7.17.28, pod label `app: elasticsearch`, Service `elasticsearch:9200` — kept in `deploy/bases/elasticsearch/` (unchanged) for operators who need the ES licensing model or cannot migrate.
+
+**Toggle is three comment swaps** (no NP edits needed — all NetworkPolicies in `bases/app/`, `bases/consumer/`, and `components/proxysql/patches/` allow egress to both labels simultaneously):
+1. `deploy/walkthrough/step-1/kustomization.yaml` — activate `../../bases/opensearch` or `../../bases/elasticsearch`.
+2. `deploy/bases/app/config/common.env` — swap the active env-var trio (OpenSearch: `OPENSEARCH_SERVER_HOSTNAME`/`_PORT`/`ENGINE=opensearch`; ES7: `ELASTICSEARCH7_SERVER_HOSTNAME`/`_PORT`/`ENGINE=elasticsearch7`).
+3. `deploy/bases/app/magento-web.yaml` and `deploy/bases/app/jobs/install.yaml` — the `wait-for-search` init container's `args` interpolate the hostname/port var by name; update the interpolation to match the active trio.
+
+`deploy-status.sh` detects whichever StatefulSet (`opensearch` or `elasticsearch`) is present — no changes needed on toggle. The services dashboard is equally engine-aware.
+
+**Existing-data caveat**: `app:config:import` does not overwrite existing `core_config_data` rows. On a populated cluster, run `php bin/magento config:set catalog/search/engine opensearch` (and matching hostname/port keys) after toggling, or destroy + redeploy. See README "Search engine toggle" section.
+
+**Security**: both bases run with security/X-Pack disabled (internal-only cluster). OpenSearch uses `DISABLE_SECURITY_PLUGIN=true` + `plugins.security.disabled=true`; ES uses `xpack.security.enabled=false`.
 
 ### Smart Deploy (`deploy/deploy.sh`)
 

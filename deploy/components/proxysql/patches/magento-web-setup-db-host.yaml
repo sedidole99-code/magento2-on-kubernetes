@@ -16,7 +16,7 @@
 # kustomize v5.x's strategic-merge of named lists (containers/initContainers)
 # does NOT reliably preserve order when the patch lists only a subset of
 # the entries — in our case the patched `setup` entry got moved to index 0,
-# which made it run before `wait-for-db`/`wait-for-elasticsearch` and crash
+# which made it run before `wait-for-db`/`wait-for-search` and crash
 # with CreateContainerConfigError-then-Exit-1 because the DB wasn't up yet.
 # A JSON 6902 `replace` on a specific path mutates in place and never
 # touches the surrounding list ordering.
@@ -32,7 +32,7 @@
 #   initContainers[0] = wait-for-rabbitmq
 #   initContainers[1] = wait-for-redis
 #   initContainers[2] = wait-for-db
-#   initContainers[3] = wait-for-elasticsearch
+#   initContainers[3] = wait-for-search
 #   initContainers[4] = setup
 #     env[0] = DB_HOST       <-- this is what we replace
 #     env[1] = DB_NAME       (from secretKeyRef)

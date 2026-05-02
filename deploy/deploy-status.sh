@@ -144,8 +144,23 @@ status_one() {
   fi
 
   # ---- StatefulSets ---------------------------------------------------------
-  local sts_expected=(db elasticsearch rabbitmq redis-cache redis-page-cache redis-sessions)
+  local sts_expected=(db rabbitmq redis-cache redis-page-cache redis-sessions)
   [[ $has_proxysql == 1 ]] && sts_expected+=(db-replica proxysql)
+  # Detect which search backend is deployed (opensearch default, elasticsearch alternate)
+  local has_opensearch=0 has_elasticsearch_search=0
+  $KUBECTL -n "$ns" get sts opensearch >/dev/null 2>&1 && has_opensearch=1 || true
+  $KUBECTL -n "$ns" get sts elasticsearch >/dev/null 2>&1 && has_elasticsearch_search=1 || true
+  if [[ $has_opensearch == 1 && $has_elasticsearch_search == 1 ]]; then
+    note "both opensearch and elasticsearch StatefulSets present — exactly one is expected; check step-1/kustomization.yaml"
+    sts_expected+=(opensearch elasticsearch)
+  elif [[ $has_opensearch == 1 ]]; then
+    sts_expected+=(opensearch)
+  elif [[ $has_elasticsearch_search == 1 ]]; then
+    sts_expected+=(elasticsearch)
+  else
+    note "search backend StatefulSet not found in namespace; expected opensearch (default) or elasticsearch (toggle)"
+    sts_expected+=(opensearch)
+  fi
   local s ready desired
   for s in "${sts_expected[@]}"; do
     if ! $KUBECTL -n "$ns" get sts "$s" >/dev/null 2>&1; then

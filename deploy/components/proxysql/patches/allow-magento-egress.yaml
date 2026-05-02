@@ -38,6 +38,14 @@ spec:
     ports:
     - protocol: TCP
       port: 9200
+  # magento-web -> opensearch:9200 (search engine)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: opensearch
+    ports:
+    - protocol: TCP
+      port: 9200
   - to:
     - podSelector:
         matchLabels:
@@ -90,6 +98,14 @@ spec:
     - podSelector:
         matchLabels:
           app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # magento-cron -> opensearch:9200 (search engine)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: opensearch
     ports:
     - protocol: TCP
       port: 9200
@@ -156,6 +172,14 @@ spec:
     - podSelector:
         matchLabels:
           app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # magento-install -> opensearch:9200 (search engine)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: opensearch
     ports:
     - protocol: TCP
       port: 9200

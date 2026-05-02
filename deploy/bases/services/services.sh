@@ -106,9 +106,14 @@ EOF
 
   # Static: images
   local img_magento img_db img_es img_redis_cache img_redis_page_cache img_redis_sessions img_varnish img_rabbitmq
+  local engine_name="opensearch"
   img_magento=$(pod_image "app=magento,component=web" "magento-web" "$nf")
   img_db=$(pod_image "app=db" "" "$nf")
-  img_es=$(pod_image "app=elasticsearch" "" "$nf")
+  img_es=$(pod_image "app=opensearch" "" "$nf")
+  if [[ -z "$img_es" || "$img_es" == "n/a" ]]; then
+    img_es=$(pod_image "app=elasticsearch" "" "$nf")
+    engine_name="elasticsearch"
+  fi
   img_redis_cache=$(pod_image "app=redis,role=cache" "" "$nf")
   img_redis_page_cache=$(pod_image "app=redis,role=page-cache" "" "$nf")
   img_redis_sessions=$(pod_image "app=redis,role=sessions" "" "$nf")
@@ -120,7 +125,10 @@ EOF
   local svc_grafana svc_prometheus svc_kibana svc_services svc_k8s_dash
   svc_magento=$(svc_endpoint magento-web "$nf")
   svc_db=$(svc_endpoint db "$nf")
-  svc_es=$(svc_endpoint elasticsearch "$nf")
+  svc_es=$(svc_endpoint opensearch "$nf")
+  if [[ -z "$svc_es" || "$svc_es" == "n/a" ]]; then
+    svc_es=$(svc_endpoint elasticsearch "$nf")
+  fi
   svc_redis_cache=$(svc_endpoint redis-cache "$nf")
   svc_redis_page_cache=$(svc_endpoint redis-page-cache "$nf")
   svc_redis_sessions=$(svc_endpoint redis-sessions "$nf")
@@ -212,7 +220,7 @@ EOF
     "name": "$(je "$db_name")",
     "image": "$(je "$img_db")"
   },
-  "elasticsearch": { "image": "$(je "$img_es")" },
+  "search": { "engine": "$(je "$engine_name")", "image": "$(je "$img_es")" },
   "redis_cache": { "image": "$(je "$img_redis_cache")" },
   "redis_page_cache": { "image": "$(je "$img_redis_page_cache")" },
   "redis_sessions": { "image": "$(je "$img_redis_sessions")" },
@@ -225,7 +233,7 @@ EOF
   "services": {
     "magento_web": "$(je "$svc_magento")",
     "db": "$(je "$svc_db")",
-    "elasticsearch": "$(je "$svc_es")",
+    "search": "$(je "$svc_es")",
     "redis_cache": "$(je "$svc_redis_cache")",
     "redis_page_cache": "$(je "$svc_redis_page_cache")",
     "redis_sessions": "$(je "$svc_redis_sessions")",

@@ -267,14 +267,16 @@ function render() {
   ], cmd('kubectl port-forward svc/db 3306:3306' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
   isAvailable(svc.db));
 
-  // Elasticsearch
-  html += card('Elasticsearch (Search)', [
-    row('Host', mono('elasticsearch:9200')),
-    row('Service', mono(svc.elasticsearch || 'n/a')),
+  // Search Engine (OpenSearch by default; Elasticsearch if toggled)
+  const searchEngine = d.search?.engine || 'opensearch';
+  const searchSvc = svc.search || 'n/a';
+  html += card('Search Engine (' + searchEngine.charAt(0).toUpperCase() + searchEngine.slice(1) + ')', [
+    row('Host', mono(searchEngine + ':9200')),
+    row('Service', mono(searchSvc)),
     row('Security', badge('disabled', 'yellow')),
-    row('Image', mono(d.elasticsearch?.image)),
-  ], cmd('kubectl port-forward svc/elasticsearch 9200:9200' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
-  isAvailable(svc.elasticsearch));
+    row('Image', mono(d.search?.image)),
+  ], cmd('kubectl port-forward svc/' + searchEngine + ' 9200:9200' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
+  isAvailable(searchSvc));
 
   // Redis — Cache (default backend)
   html += card('Redis Cache', [
