@@ -53,9 +53,12 @@ spec:
           value: opensearch-0.opensearch
         - name: cluster.initial_cluster_manager_nodes
           value: opensearch-0
+        # DISABLE_SECURITY_PLUGIN=true causes the entrypoint to inject
+        # -Eplugins.security.disabled=true into the JVM args. Setting the
+        # same key here as a separate env var would make OpenSearch fail
+        # with "setting [plugins.security.disabled] already set, saw [true]
+        # and [true]". One source of truth only.
         - name: DISABLE_SECURITY_PLUGIN
-          value: "true"
-        - name: plugins.security.disabled
           value: "true"
         readinessProbe:
           httpGet:

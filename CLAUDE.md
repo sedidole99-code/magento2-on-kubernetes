@@ -192,7 +192,7 @@ Default: **OpenSearch 2.19.5** (`opensearchproject/opensearch:2.19.5`), pod labe
 
 **Existing-data caveat**: `app:config:import` does not overwrite existing `core_config_data` rows. On a populated cluster, run `php bin/magento config:set catalog/search/engine opensearch` (and matching hostname/port keys) after toggling, or destroy + redeploy. See README "Search engine toggle" section.
 
-**Security**: both bases run with security/X-Pack disabled (internal-only cluster). OpenSearch uses `DISABLE_SECURITY_PLUGIN=true` + `plugins.security.disabled=true`; ES uses `xpack.security.enabled=false`.
+**Security**: both bases run with security/X-Pack disabled (internal-only cluster). OpenSearch uses `DISABLE_SECURITY_PLUGIN=true` **alone** — the container entrypoint translates that into `-Eplugins.security.disabled=true`, so setting the same key as a separate env var (e.g. `name: plugins.security.disabled`) trips `setting [plugins.security.disabled] already set, saw [true] and [true]` and the pod CrashLoops. ES uses `xpack.security.enabled=false`.
 
 ### Smart Deploy (`deploy/deploy.sh`)
 
