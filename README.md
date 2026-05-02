@@ -101,7 +101,7 @@ Auto-detects zero-downtime vs maintenance-mode based on `setup:db:status` and `a
 | `make deploy-zero` | Force zero-downtime rolling update |
 | `make deploy-maintenance` | Force maintenance-mode (scale down, upgrade, scale up) |
 | `make deploy-only` | Deploy without building (uses existing image) |
-| `make deploy-status` | One-shot HEALTHY / IN PROGRESS / FAILED / NOT DEPLOYED classifier (exit 0/1/2/3); accepts `<env>` or `all` |
+| `make deploy-status` | One-shot classifier; exit `0`=HEALTHY, `1`=FAILED, `2`=IN PROGRESS, `3`=NOT DEPLOYED; accepts `<env>` or `all` |
 | `make deploy-watch` | Auto-refreshing variant of `deploy-status`; exits after 3 consecutive HEALTHY ticks |
 
 ### Monitoring & Logging
@@ -306,7 +306,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 - [ ] **imgproxy for on-the-fly image optimization** — deploy [imgproxy](https://imgproxy.net/) as a standalone service that resizes, reformats, and optimizes Magento product/CMS images at request time instead of pre-generating every variant at catalog save. Magento's `pub/media/catalog/product/cache/` balloons to tens of thousands of files per product (every size × every theme), inflating the media PVC and coupling cache regeneration to deploys. imgproxy generates variants in memory on demand, supports modern formats (WebP, AVIF) via `Accept`-header content negotiation, and reads directly from PVC or S3. Land as a new `deploy/bases/imgproxy/` (Deployment + Service + NetworkPolicy + HPA) plus an opt-in `deploy/components/imgproxy/` toggle that rewires Nginx to route `/media/catalog/product/...` through it. Use signed URLs (`IMGPROXY_KEY` + `IMGPROXY_SALT` from a generated Secret) to prevent arbitrary-URL abuse. Pairs naturally with the S3 media TODO — imgproxy reads from S3 natively, eliminating the shared-PVC dependency.
 
-- [-] **OpenSearch migration** — replace Elasticsearch 7.17 (EOL, last patch Dec 2024) with OpenSearch 2.x. Magento 2.4.6+ supports OpenSearch natively via `CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch`. Avoids Elastic licensing restrictions (SSPL), gets active security patches, and is a drop-in replacement. Requires updating the base StatefulSet image, `common.env` search engine config, and health check endpoint.
+- [ ] **OpenSearch migration** — replace Elasticsearch 7.17 (EOL, last patch Dec 2024) with OpenSearch 2.x. Magento 2.4.6+ supports OpenSearch natively via `CONFIG__DEFAULT__CATALOG__SEARCH__ENGINE=opensearch`. Avoids Elastic licensing restrictions (SSPL), gets active security patches, and is a drop-in replacement. Requires updating the base StatefulSet image, `common.env` search engine config, and health check endpoint.
 
 - [-] **Media storage on S3** — use Magento's built-in remote storage module (`--remote-storage-driver=aws-s3`) to store `pub/media` on S3/MinIO instead of a shared PVC. The current `ReadWriteOnce` PVC can only be mounted on one node, which blocks multi-zone deployments and makes horizontal scaling of magento-web fragile. S3 also eliminates the need for media backup CronJobs and enables CDN integration.
 
