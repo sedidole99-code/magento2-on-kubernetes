@@ -203,6 +203,12 @@ spec:
         - mountPath: /var/www/html/pub/media
           name: media
           subPath: media
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        - name: nginx-config
+          mountPath: /etc/nginx/sites-available/default
+          subPath: magento2.conf
       - name: php-metrics-exporter
         image: hipages/php-fpm_exporter@sha256:9b5be9d3d9551e5f0155988dd799c55d6a5c08d1ce47218fccd1b030cfdd3447
         env:
@@ -238,3 +244,6 @@ spec:
       - name: media
         persistentVolumeClaim:
           claimName: media
+      - name: nginx-config
+        configMap:
+          name: nginx
