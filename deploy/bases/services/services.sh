@@ -105,7 +105,7 @@ EOF
   es_log_pass=$(secret_value elasticsearch-master-credentials password "$nf")
 
   # Static: images
-  local img_magento img_db img_es img_redis_cache img_redis_page_cache img_redis_sessions img_varnish img_rabbitmq
+  local img_magento img_db img_es img_redis_cache img_redis_page_cache img_redis_sessions img_varnish img_rabbitmq img_imgproxy
   local engine_name="opensearch"
   img_magento=$(pod_image "app=magento,component=web" "magento-web" "$nf")
   img_db=$(pod_image "app=db" "" "$nf")
@@ -119,9 +119,10 @@ EOF
   img_redis_sessions=$(pod_image "app=redis,role=sessions" "" "$nf")
   img_varnish=$(pod_image "app=varnish" "" "$nf")
   img_rabbitmq=$(pod_image "app=rabbitmq" "" "$nf")
+  img_imgproxy=$(pod_image "app=imgproxy" "" "$nf")
 
   # Dynamic: services
-  local svc_magento svc_db svc_es svc_redis_cache svc_redis_page_cache svc_redis_sessions svc_varnish svc_rabbitmq
+  local svc_magento svc_db svc_es svc_redis_cache svc_redis_page_cache svc_redis_sessions svc_varnish svc_rabbitmq svc_imgproxy
   local svc_grafana svc_prometheus svc_kibana svc_services svc_k8s_dash
   svc_magento=$(svc_endpoint magento-web "$nf")
   svc_db=$(svc_endpoint db "$nf")
@@ -134,6 +135,7 @@ EOF
   svc_redis_sessions=$(svc_endpoint redis-sessions "$nf")
   svc_varnish=$(svc_endpoint varnish "$nf")
   svc_rabbitmq=$(svc_endpoint rabbitmq "$nf")
+  svc_imgproxy=$(svc_endpoint imgproxy "$nf")
   svc_grafana=$(svc_endpoint kube-prometheus-stack-grafana "$nf")
   svc_prometheus=$(svc_endpoint kube-prometheus-stack-prometheus "$nf")
   svc_kibana=$(svc_endpoint kibana-kibana "$nf")
@@ -226,6 +228,7 @@ EOF
   "redis_sessions": { "image": "$(je "$img_redis_sessions")" },
   "varnish": { "image": "$(je "$img_varnish")" },
   "rabbitmq": { "user": "$(je "$rabbitmq_user")", "password": "$(je "$rabbitmq_pass")", "image": "$(je "$img_rabbitmq")" },
+  "imgproxy": { "image": "$(je "$img_imgproxy")" },
   "kibana": { "es_password": "$(je "$es_log_pass")" },
   "helm_releases": $helm_json,
   "pods_running": $pods_running,
@@ -239,6 +242,7 @@ EOF
     "redis_sessions": "$(je "$svc_redis_sessions")",
     "varnish": "$(je "$svc_varnish")",
     "rabbitmq": "$(je "$svc_rabbitmq")",
+    "imgproxy": "$(je "$svc_imgproxy")",
     "grafana": "$(je "$svc_grafana")",
     "prometheus": "$(je "$svc_prometheus")",
     "kibana": "$(je "$svc_kibana")",

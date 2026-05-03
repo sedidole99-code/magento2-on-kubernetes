@@ -332,6 +332,14 @@ function render() {
   ], cmd('kubectl port-forward svc/rabbitmq 15672:15672' + (activeEnv !== 'default' ? ' -n ' + activeEnv : '')),
   isAvailable(svc.rabbitmq));
 
+  // imgproxy
+  html += card('imgproxy', [
+    row('Host', mono('imgproxy:8080')),
+    row('Service', mono(svc.imgproxy || 'n/a')),
+    row('Note', 'Internal-only — no Ingress'),
+    row('Image', mono(d.imgproxy?.image)),
+  ], null, isAvailable(svc.imgproxy));
+
   // Only show infra services for default namespace
   if (activeEnv === 'default') {
     // Grafana

@@ -1,0 +1,103 @@
+---
+# Re-write magento-web's egress list, adding imgproxy:8080.
+#
+# This patch fully replaces spec.egress on the allow-magento-web
+# NetworkPolicy. Kustomize strategic merge does not append to lists
+# without a merge-key — same constraint the proxysql component handles
+# the same way (see deploy/components/proxysql/patches/allow-magento-egress.yaml).
+#
+# When BOTH proxysql and imgproxy components are enabled (production
+# default), this patch is applied AFTER proxysql's rewrite. To preserve
+# the proxysql-specific rules, this file ships a superset of:
+#   - all rules from the base allow-magento-web (db, search, redis,
+#     rabbitmq, varnish, kube-dns)
+#   - the proxysql component's additions (proxysql:6033, db:3306 kept
+#     for the setup init container's primary-direct path)
+#   - the imgproxy:8080 addition
+#
+# When the proxysql component is OFF (staging, dev), the db:3306 rule is
+# already present in the base — this patch is still correct because it
+# carries that rule too. Net effect: imgproxy works regardless of the
+# proxysql toggle, at the cost of writing the rule list once in two places.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-magento-web
+spec:
+  egress:
+  # Direct primary connection — kept for the magento-web `setup` init
+  # container (see proxysql component's magento-web-setup-db-host.yaml).
+  # When proxysql is OFF, this is also the runtime DB path.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - protocol: TCP
+      port: 3306
+  # ProxySQL (when proxysql component is ON). Allowing the rule when
+  # proxysql is off is harmless — there's no pod with `app: proxysql` so
+  # the rule never matches a real flow.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: proxysql
+    ports:
+    - protocol: TCP
+      port: 6033
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  - to:
+    - podSelector:
+        matchLabels:
+          app: opensearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: rabbitmq
+    ports:
+    - protocol: TCP
+      port: 5672
+  - to:
+    - podSelector:
+        matchLabels:
+          app: varnish
+    ports:
+    - protocol: TCP
+      port: 6081
+  # NEW: magento-web -> imgproxy:8080 (catalog product image transcoding)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: imgproxy
+    ports:
+    - protocol: TCP
+      port: 8080
+  # DNS resolution via kube-system/kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

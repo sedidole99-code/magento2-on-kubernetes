@@ -8,6 +8,12 @@ namespace: staging
 resources:
 - ../../walkthrough/step-4
 
+# Components from step-4 (resource-limits-added) accumulate with anything
+# declared here — Kustomize does NOT replace inherited components.
+components:
+  # imgproxy: off in staging by default. Uncomment for staging-side load
+  # testing of the transcode pipeline.
+  # - ../../components/imgproxy
 
 configMapGenerator:
 - behavior: merge

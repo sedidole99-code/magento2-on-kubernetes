@@ -289,6 +289,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 | **Kustomize components** | None | `deploy/components/resource-limits-added/` — single-file toggle that re-applies the cpu-limit additions on `db` + `rabbitmq` + `varnish`. Comment its `patches:` block to revert those three containers to the pre-initiative state without touching base manifests. |
 | **Database topology** | Single Percona 8.0 primary | `deploy/components/proxysql/` (opt-in; on by default in `deploy/overlays/production`) — adds 2 async-GTID Percona 8.0 replicas (bootstrapped via the MySQL 8.0 CLONE plugin) + 2 ProxySQL pods in cluster mode for read/write split with connection multiplexing. Magento keeps a single connection string — the existing `db` Service is patched to point at ProxySQL on 6033 transparently; new `db-primary` Service preserves direct primary access for `mysqldump` and operator queries. Read-after-write hot tables (`quote*`, `sales_*`, `checkout_*`, `customer_(entity\|address_entity\|grid_flat)`) pinned to writer via `mysql_query_rules`. Lag-aware routing with `writer_is_also_reader=1` falls back to primary if all replicas exceed `max_replication_lag=30`. |
 | **Search engine** | Elasticsearch 7.17 (EOL, SSPL-licensed) | OpenSearch 2.19.5 (Apache-2.0, active security patches). Drop-in replacement via Magento 2.4.6+'s native `opensearch` driver. `deploy/bases/elasticsearch/` retained as a comment-swap fallback — see "Search engine toggle" below. |
+| **imgproxy** | None | `deploy/components/imgproxy/` (opt-in; on in production) — routes `/media/catalog/product/` images through imgproxy for in-memory WebP/AVIF transcode. Reads media PVC directly (`IMGPROXY_LOCAL_FILESYSTEM_ROOT=/local`); co-scheduled via `podAffinity` to magento-web (RWO PVC constraint). nginx ConfigMap replaced by component. Signing deferred (ClusterIP + NetworkPolicy boundary). Production HPA: min 2 / max 10. |
 | **Image tagging** | Static | Git SHA with `-dirty` suffix, minikube docker-env |
 | **Makefile** | 4 targets | 30+ targets with env support, install log streaming |
 | **README** | Minimal | Full docs, troubleshooting, production guide |
@@ -305,7 +306,7 @@ make deploy IMAGE_REPO=registry.example.com/magento2 IMAGE_TAG=v1.2.3
 
 ### Medium priority (scalability & architecture)
 
-- [ ] **imgproxy for on-the-fly image optimization** — deploy [imgproxy](https://imgproxy.net/) as a standalone service that resizes, reformats, and optimizes Magento product/CMS images at request time instead of pre-generating every variant at catalog save. Magento's `pub/media/catalog/product/cache/` balloons to tens of thousands of files per product (every size × every theme), inflating the media PVC and coupling cache regeneration to deploys. imgproxy generates variants in memory on demand, supports modern formats (WebP, AVIF) via `Accept`-header content negotiation, and reads directly from PVC or S3. Land as a new `deploy/bases/imgproxy/` (Deployment + Service + NetworkPolicy + HPA) plus an opt-in `deploy/components/imgproxy/` toggle that rewires Nginx to route `/media/catalog/product/...` through it. Use signed URLs (`IMGPROXY_KEY` + `IMGPROXY_SALT` from a generated Secret) to prevent arbitrary-URL abuse. Pairs naturally with the S3 media TODO — imgproxy reads from S3 natively, eliminating the shared-PVC dependency.
+- [x] **imgproxy for on-the-fly image optimization** — deploy [imgproxy](https://imgproxy.net/) as a standalone service that resizes, reformats, and optimizes Magento product/CMS images at request time instead of pre-generating every variant at catalog save. Magento's `pub/media/catalog/product/cache/` balloons to tens of thousands of files per product (every size × every theme), inflating the media PVC and coupling cache regeneration to deploys. imgproxy generates variants in memory on demand, supports modern formats (WebP, AVIF) via `Accept`-header content negotiation, and reads directly from PVC or S3. Land as a new `deploy/bases/imgproxy/` (Deployment + Service + NetworkPolicy + HPA) plus an opt-in `deploy/components/imgproxy/` toggle that rewires Nginx to route `/media/catalog/product/...` through it. Use signed URLs (`IMGPROXY_KEY` + `IMGPROXY_SALT` from a generated Secret) to prevent arbitrary-URL abuse. Pairs naturally with the S3 media TODO — imgproxy reads from S3 natively, eliminating the shared-PVC dependency.
 
 - [-] **Media storage on S3** — use Magento's built-in remote storage module (`--remote-storage-driver=aws-s3`) to store `pub/media` on S3/MinIO instead of a shared PVC. The current `ReadWriteOnce` PVC can only be mounted on one node, which blocks multi-zone deployments and makes horizontal scaling of magento-web fragile. S3 also eliminates the need for media backup CronJobs and enables CDN integration.
 
@@ -360,6 +361,56 @@ php bin/magento config:set catalog/search/elasticsearch7_server_port 9200
 php bin/magento indexer:reindex catalogsearch_fulltext
 ```
 Or destroy and redeploy (`make destroy <env>` + `make step-4-deploy <env>`) to start fresh.
+
+## imgproxy toggle
+
+imgproxy is **off in step-4/dev**, **off in staging**, and **on in production** by default. One comment line controls it per env:
+
+**1. `deploy/walkthrough/step-4/kustomization.yaml`** — uncomment `../../components/imgproxy` under `components:` to enable in dev/minikube:
+```
+# - ../../components/imgproxy
+```
+
+**2. `deploy/overlays/staging/kustomization.yaml`** — uncomment `../../components/imgproxy` under `components:` to enable in staging:
+```
+# - ../../components/imgproxy
+```
+
+**3. `deploy/overlays/production/kustomization.yaml`** — already uncommented (on by default in production):
+```
+- ../../components/imgproxy
+```
+
+`kind` and `test` overlays reference step-3, not step-4, so they never include the toggle line.
+
+### What changes when enabled
+
+- An `imgproxy` Deployment + ClusterIP Service (port 8080) + NetworkPolicy + PDB + HPA are added to the namespace.
+- The `nginx` ConfigMap in magento-web is **replaced** with a version that proxies `/media/catalog/product/...` through imgproxy. nginx strips the `cache/<hash>/` segment from Magento's pre-resize URLs so imgproxy reads the original file on disk. On imgproxy 5xx, nginx falls back to `get.php` (Magento's existing media-fallback path), so users see the original image rather than a 502.
+- The `allow-magento-web` NetworkPolicy egress list gains an imgproxy:8080 rule (patched by the component).
+
+### Routes intercepted
+
+Only `/media/catalog/product/...` is routed through imgproxy. CMS images (`/media/wysiwyg/`), theme assets (`/static/`), favicons, and all other media paths continue serving directly via `try_files` in nginx.
+
+### Unsigned-URL trade-off
+
+All environments run with `IMGPROXY_ALLOW_INSECURE=true`. nginx's `proxy_pass` generates unsigned imgproxy URLs; imgproxy refuses them unless this flag is set. The security boundary is ClusterIP + NetworkPolicy: the imgproxy Service is unreachable from outside the cluster, and the `allow-imgproxy` NetworkPolicy restricts ingress to pods with `app=magento,component=web` on port 8080 only. Future hardening: add a Magento-side custom module that rewrites `<img src>` tags to include an HMAC signature, then remove `IMGPROXY_ALLOW_INSECURE`.
+
+### First-enable on production
+
+Run `make deploy-maintenance prod` the first time you enable imgproxy in production. Enabling the component changes the nginx ConfigMap hash → magento-web rolls. With a `ReadWriteOnce` media PVC, the rolling surge replica may fail to bind on a different node and stall the rollout. `deploy.sh` would auto-detect zero-downtime (no schema change), so you must override it explicitly with `make deploy-maintenance prod`. Subsequent deploys that do not touch the nginx ConfigMap do not re-roll magento-web and `make deploy prod` works fine.
+
+### Verify imgproxy is active
+
+```bash
+# Check imgproxy pods are running
+kubectl -n <namespace> get pods -l app=imgproxy
+
+# Check WebP is served when Accept: image/webp is present
+curl -I -H 'Accept: image/webp' https://<hostname>/media/catalog/product/<path>.jpg
+# Look for: content-type: image/webp
+```
 
 ## Contributing
 

@@ -14,6 +14,13 @@ resources:
 # auto-reverts together with the components: entry).
 components:
 - ../../components/proxysql
+# imgproxy: production renders all /media/catalog/product/ images via
+# imgproxy with auto WebP/AVIF + quality 85. HPA bounds patched to 2/10
+# below. NOTE: enabling for the first time changes the nginx ConfigMap
+# hash → magento-web rolls. Under RWO media PVC the surge replica may
+# fail to bind on a different node; first-enable should run as
+# `make deploy-maintenance prod`. See CLAUDE.md "imgproxy" section.
+- ../../components/imgproxy
 
 configMapGenerator:
 - behavior: merge
@@ -25,5 +32,6 @@ patches:
 # Re-enable alongside ../../bases/consumer in walkthrough/step-4/kustomization.yaml
 # - path: patches/magento-consumer.yaml
 - path: patches/hpa.yaml
+- path: patches/imgproxy-hpa.yaml
 - path: patches/ingress.yaml
 - path: patches/database.yaml

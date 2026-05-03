@@ -23,6 +23,11 @@ components:
 # this ships 2 ProxySQL pods + 2 MySQL replicas; minikube needs ~2 GiB
 # additional memory and ~25 GiB disk.
 # - ../../components/proxysql
+# imgproxy on-the-fly image optimization is off by default in step-4 to
+# keep minikube light. Uncomment to enable transcoding via imgproxy for
+# /media/catalog/product/ requests. Adds 1-5 imgproxy pods + an HPA;
+# mounts the existing media PVC read-only.
+# - ../../components/imgproxy
 
 configMapGenerator:
 - behavior: merge

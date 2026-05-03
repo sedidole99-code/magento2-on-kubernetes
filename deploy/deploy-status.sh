@@ -186,6 +186,9 @@ status_one() {
   if $KUBECTL -n "$ns" get deploy magento-consumer >/dev/null 2>&1; then
     deploys+=(magento-consumer)
   fi
+  if $KUBECTL -n "$ns" get deploy imgproxy >/dev/null 2>&1; then
+    deploys+=(imgproxy)
+  fi
   for d in "${deploys[@]}"; do
     if ! $KUBECTL -n "$ns" get deploy "$d" >/dev/null 2>&1; then
       bad "Deployment/$d missing"
