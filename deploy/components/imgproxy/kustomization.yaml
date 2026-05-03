@@ -8,9 +8,8 @@ resources:
 
 configMapGenerator:
 - name: nginx
-  behavior: replace
+  behavior: merge
   files:
-  - default.conf=patches/nginx-default.conf
   - magento2.conf=patches/nginx-magento2.conf
 
 patches:
